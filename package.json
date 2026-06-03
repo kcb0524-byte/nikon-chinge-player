@@ -1,0 +1,13 @@
+{
+  "name": "nikon-chinge-music-player",
+  "version": "1.0.0",
+  "description": "니콘 친게 뮤직 플레이어",
+  "scripts": {
+    "dev": "echo 'dev'",
+    "build": "echo 'build'",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
