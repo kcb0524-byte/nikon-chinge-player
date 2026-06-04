@@ -25,10 +25,6 @@ jobs:
       - name: Build Tauri app
         run: npm run tauri build
 
-      - name: List build output
-        run: |
-          dir src-tauri\target\release\bundle\ /s /b
-
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
