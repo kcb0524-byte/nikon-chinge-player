@@ -842,20 +842,15 @@ impl AudioEngine {
             return OutputStream::try_default().map_err(|e| e.to_string());
         }
 
-        // macOS: CoreAudio FFI로 시스템 기본 출력 장치 변경 → try_default()
-        #[cfg(target_os = "macos")]
-        {
-            let name_owned = device_name.to_string();
-            let result = std::thread::spawn(move || -> Option<bool> {
-                let id = ca::find_device(&name_owned)?;
-                Some(ca::set_default_output(id))
-            }).join();
-            match result {
-                Ok(Some(true)) => {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    return OutputStream::try_default().map_err(|e| e.to_string());
-                }
-                Ok(Some(false)) =>
+        // Windows / Linux: cpal로 장치 직접 지정
+        for host_id in available_hosts() {
+            if let Ok(host) = host_from_id(host_id) {
+                if let Ok(mut devices) = host.output_devices() {
+                    if let Some(d) = devices.find(|d| {
+                        d.name().map(|n| n == device_name).unwrap_or(false)
+                    }) {
+                        if let Ok(pair) = OutputStream::try_from_device(&d) {
+                            return Ok(pair);
                         }
                     }
                 }
