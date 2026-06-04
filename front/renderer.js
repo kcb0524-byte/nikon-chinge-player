@@ -4,8 +4,8 @@
   'use strict';
 
   const { open } = window.__TAURI__.dialog;
+  const { readDir } = window.__TAURI__.fs;
   const { invoke } = window.__TAURI__.core;
-  const { listen } = window.__TAURI__.event;
 
   const SUPPORTED_EXTS = new Set(['mp3','flac','wav','aac','m4a','ogg','opus','wma',
     'aiff','aif','ape','wv','mpc','tta','spx','amr','mp4','webm','mkv','m4b',
@@ -117,9 +117,14 @@
     const bc=spectrumData.length, bw=(w/bc)-1;
     for(let i=0;i<bc;i++){
       const val=spectrumData[i]||0, bh=val*h*0.95;
-      const hue=25+(i/bc)*20;
+      // 저역: 청록 → 고역: 그린으로 그라디언트
+      const t=i/bc;
+      const r=Math.round(0*(1-t)+82*t);
+      const g2=Math.round(180*(1-t)+183*t);
+      const b=Math.round(216*(1-t)+136*t);
       const g=specCtx.createLinearGradient(0,h-bh,0,h);
-      g.addColorStop(0,`hsla(${hue},80%,65%,0.9)`);g.addColorStop(1,`hsla(${hue},60%,35%,0.3)`);
+      g.addColorStop(0,`rgba(${r},${g2},${b},0.95)`);
+      g.addColorStop(1,`rgba(${r},${g2},${b},0.15)`);
       specCtx.fillStyle=g; specCtx.fillRect(i*(bw+1),h-bh,bw,bh);
     }
   }
@@ -133,23 +138,23 @@
     const bg=ctx.createLinearGradient(bx,by,bx,by+bH);
     bg.addColorStop(0,'#f0ebe0');bg.addColorStop(1,'#d8d0c0');
     ctx.fillStyle=bg;ctx.fillRect(bx,by,bW,bH);
-    ctx.strokeStyle='#8a7a60';ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bW,bH);
+    ctx.strokeStyle='#e76f51';ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bW,bH);
     ctx.restore();
     const cx=bx+bW/2,cy=by+bH+8,R=bH*1.05,sA=Math.PI,eA=Math.PI*2,sp=eA-sA;
     ctx.save();ctx.beginPath();ctx.rect(bx,by,bW,bH);ctx.clip();
-    ctx.save();ctx.beginPath();ctx.arc(cx,cy,R*0.9,sA+sp*0.8,eA);ctx.lineTo(cx,cy);ctx.closePath();ctx.fillStyle='rgba(200,50,20,0.12)';ctx.fill();ctx.restore();
+    ctx.save();ctx.beginPath();ctx.arc(cx,cy,R*0.9,sA+sp*0.8,eA);ctx.lineTo(cx,cy);ctx.closePath();ctx.fillStyle='rgba(231,111,81,0.10)';ctx.fill();ctx.restore();
     [{t:0,txt:'-20',mj:true},{t:0.20,txt:'-10',mj:true},{t:0.38,txt:'-7',mj:false},{t:0.52,txt:'-5',mj:true},{t:0.65,txt:'-3',mj:false},{t:0.77,txt:'0',mj:true},{t:0.88,txt:'+2',mj:false},{t:1,txt:'+3',mj:true}].forEach(({t,txt,mj})=>{
       const a=sA+t*sp,isR=t>=0.77;
       ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*R*(mj?0.68:0.74),cy+Math.sin(a)*R*(mj?0.68:0.74));ctx.lineTo(cx+Math.cos(a)*R*0.88,cy+Math.sin(a)*R*0.88);
-      ctx.strokeStyle=isR?'#c02010':'#444430';ctx.lineWidth=mj?1.8:0.9;ctx.stroke();
-      if(mj){ctx.fillStyle=isR?'#c02010':'#333320';ctx.font=`bold ${Math.max(8,bH*0.11)}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(txt,cx+Math.cos(a)*R*0.57,cy+Math.sin(a)*R*0.57);}
+      ctx.strokeStyle=isR?'#e76f51':'#444430';ctx.lineWidth=mj?1.8:0.9;ctx.stroke();
+      if(mj){ctx.fillStyle=isR?'#e76f51':'#333320';ctx.font=`bold ${Math.max(8,bH*0.11)}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(txt,cx+Math.cos(a)*R*0.57,cy+Math.sin(a)*R*0.57);}
     });
     ctx.fillStyle='#222210';ctx.font=`bold ${Math.max(9,bH*0.13)}px Georgia,serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('VU',cx,by+bH*0.30);
-    ctx.font=`${Math.max(8,bH*0.10)}px sans-serif`;ctx.fillStyle='#666650';ctx.fillText(label,cx,by+bH*0.48);
+    ctx.font=`${Math.max(8,bH*0.10)}px sans-serif`;ctx.fillStyle='#e76f51';ctx.fillText(label,cx,by+bH*0.48);
     const nA=sA+needle.angle*sp,nL=R*0.86;
     ctx.beginPath();ctx.moveTo(cx+Math.cos(nA+Math.PI)*R*0.14,cy+Math.sin(nA+Math.PI)*R*0.14);ctx.lineTo(cx+Math.cos(nA)*nL,cy+Math.sin(nA)*nL);
-    ctx.strokeStyle='#bb1100';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.stroke();
-    ctx.beginPath();ctx.arc(cx,cy,5,0,Math.PI*2);ctx.fillStyle='#555540';ctx.fill();
+    ctx.strokeStyle='#f4a261';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.stroke();
+    ctx.beginPath();ctx.arc(cx,cy,5,0,Math.PI*2);ctx.fillStyle='#e76f51';ctx.fill();
     ctx.restore();
   }
 
@@ -282,14 +287,51 @@
     document.querySelectorAll('.pl-item').forEach((el, i) => el.classList.toggle('active', i === index));
     const items = document.querySelectorAll('.pl-item');
     if (items[index]) items[index].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    document.getElementById('track-title').textContent = t.name;
-    document.getElementById('track-artist').textContent = '니콘 친게 뮤직 플레이어';
-    clearFormatBar();
+    // 파일명에서 곡명/가수 파싱 (예: "아티스트 - 곡명.flac")
+    const nameNoExt = t.name.replace(/\.[^.]+$/, '');
+    const dashIdx = nameNoExt.indexOf(' - ');
+    let trackTitle = nameNoExt, trackArtist = '';
+    if (dashIdx > 0) {
+      trackArtist = nameNoExt.slice(0, dashIdx).trim();
+      trackTitle  = nameNoExt.slice(dashIdx + 3).trim();
+    }
+    document.getElementById('track-title').textContent = trackTitle;
+    document.getElementById('track-artist').textContent = trackArtist;
+    document.getElementById('track-file-info').innerHTML = '';
+
+    // 파일 정보 뱃지 비동기 로드
+    invoke('audio_get_file_info', { path: t.path }).then(info => {
+      if (!info) return;
+      const el = document.getElementById('track-file-info');
+      if (!el) return;
+      const badges = [];
+      // 포맷 뱃지
+      const isLossless = info.is_lossless;
+      badges.push(`<span class="track-badge format">${info.format}</span>`);
+      // 무손실 여부
+      if (isLossless) {
+        badges.push(`<span class="track-badge lossless">LOSSLESS</span>`);
+      }
+      // 비트뎁스
+      if (info.bit_depth > 0) {
+        badges.push(`<span class="track-badge info">${info.bit_depth}bit</span>`);
+      }
+      // 샘플레이트
+      if (info.sample_rate > 0) {
+        const sr = info.sample_rate % 1000 === 0
+          ? `${info.sample_rate/1000}kHz`
+          : `${(info.sample_rate/1000).toFixed(1)}kHz`;
+        badges.push(`<span class="track-badge info">${sr}</span>`);
+      }
+      // 비트레이트 (손실 압축만)
+      if (!isLossless && info.bitrate_kbps > 0) {
+        badges.push(`<span class="track-badge lossy">${info.bitrate_kbps}kbps</span>`);
+      }
+      el.innerHTML = badges.join('');
+    }).catch(() => {});
+
     try {
-      const [duration] = await Promise.all([
-        invoke('audio_play', { path: t.path }),
-        invoke('audio_get_file_info', { path: t.path }).then(showFormatBar).catch(() => {}),
-      ]);
+      const duration = await invoke('audio_play', { path: t.path });
       state.currentDuration = duration;
       state.currentPosition = 0;
       if (!t.duration) { t.duration = duration; renderPlaylist(); }
@@ -297,55 +339,6 @@
       setPlayState(true);
       startPositionTracking();
     } catch(e) { console.error('재생 오류:', e); }
-  }
-
-  function clearFormatBar() {
-    const bar = document.getElementById('track-format-bar');
-    if (bar) bar.innerHTML = '';
-  }
-
-  function showFormatBar(info) {
-    const bar = document.getElementById('track-format-bar');
-    if (!bar || !info) return;
-    bar.innerHTML = '';
-
-    const add = (text, cls = '') => {
-      const b = document.createElement('span');
-      b.className = 'fmt-badge' + (cls ? ' ' + cls : '');
-      b.textContent = text;
-      bar.appendChild(b);
-    };
-
-    // 포맷
-    add(info.format);
-
-    // 비트뎁스 (손실 압축은 표시 안 함)
-    if (info.bit_depth > 0) {
-      const hiRes = info.bit_depth > 16 || info.sample_rate > 48000;
-      add(info.bit_depth + 'bit', hiRes ? 'hires' : '');
-    }
-
-    // 샘플레이트
-    const srLabel = info.sample_rate >= 1000
-      ? (info.sample_rate % 1000 === 0
-          ? (info.sample_rate / 1000) + 'kHz'
-          : (info.sample_rate / 1000).toFixed(1) + 'kHz')
-      : info.sample_rate + 'Hz';
-    const hiResSr = info.sample_rate > 48000;
-    add(srLabel, hiResSr ? 'hires' : '');
-
-    // 비트레이트 (손실 압축만)
-    if (!info.is_lossless && info.bitrate_kbps > 0) {
-      add(info.bitrate_kbps + 'kbps');
-    }
-
-    // 무손실 배지
-    if (info.is_lossless) {
-      add('LOSSLESS', 'lossless');
-    }
-
-    // 채널
-    if (info.channels === 1) add('MONO');
   }
 
   function setPlayState(p) {
@@ -377,52 +370,34 @@
   });
 
   // ── 드래그 앤 드롭 ───────────────────────────
-  // ── 드래그앤드롭 (Tauri v2 방식) ──────────────
-  // Tauri에서는 dataTransfer.files에 경로가 없으므로
-  // tauri://drag-drop 이벤트로 파일 경로를 받아야 함
   const dropOverlay = document.getElementById('drop-overlay');
   document.addEventListener('dragover', e => { e.preventDefault(); dropOverlay && dropOverlay.classList.add('active'); });
   document.addEventListener('dragleave', e => { if (!e.relatedTarget || e.relatedTarget === document.documentElement) dropOverlay && dropOverlay.classList.remove('active'); });
-  document.addEventListener('drop', e => { e.preventDefault(); dropOverlay && dropOverlay.classList.remove('active'); });
-
-  // Tauri v2 drag-drop 이벤트 — 여러 이름 동시 리슨
-  async function handleDrop(event) {
-    console.log('[drag-drop] event:', JSON.stringify(event));
-    dropOverlay && dropOverlay.classList.remove('active');
-    const payload = event.payload;
-    // Tauri v2: payload.paths 배열, 또는 payload 자체가 배열
-    const dropped = Array.isArray(payload) ? payload
-      : Array.isArray(payload?.paths) ? payload.paths
-      : typeof payload === 'string' ? [payload]
-      : [];
-    console.log('[drag-drop] dropped:', dropped);
+  document.addEventListener('drop', async e => {
+    e.preventDefault(); dropOverlay && dropOverlay.classList.remove('active');
     const paths = [];
-    for (const fp of dropped) {
-      if (!fp) continue;
-      const found = await scanFolder(fp);
-      console.log('[drag-drop] scanned', fp, '->', found.length, 'files');
-      paths.push(...found);
+    for (const f of Array.from(e.dataTransfer.files)) {
+      if (!f.path) continue;
+      const ext = f.name.split('.').pop().toLowerCase();
+      if (SUPPORTED_EXTS.has(ext)) paths.push(f.path);
+      else { const found = await scanFolder(f.path); paths.push(...found); }
     }
     if (paths.length) addFilesToPlaylist(paths);
-  }
+  });
 
-  listen('tauri://drag-drop', handleDrop);
-  listen('tauri://file-drop', handleDrop);  // 구버전 이름도 대비
-
-  listen('tauri://drag-enter', () => { dropOverlay && dropOverlay.classList.add('active'); });
-  listen('tauri://drag-over', () => { dropOverlay && dropOverlay.classList.add('active'); });
-  listen('tauri://drag-leave', () => { dropOverlay && dropOverlay.classList.remove('active'); });
-  listen('tauri://file-drop-hover', () => { dropOverlay && dropOverlay.classList.add('active'); });
-  listen('tauri://file-drop-cancelled', () => { dropOverlay && dropOverlay.classList.remove('active'); });
-
-  // Rust에서 직접 재귀 스캔 (JS fs 권한 scope 우회)
   async function scanFolder(dir) {
+    const res = [];
     try {
-      return await invoke('scan_folder', { path: dir });
-    } catch(e) {
-      console.error('scanFolder 실패:', e);
-      return [];
-    }
+      const entries = await readDir(dir, { recursive: true });
+      function collect(items) {
+        for (const it of items) {
+          if (it.children) collect(it.children);
+          else if (it.name) { const ext = it.name.split('.').pop().toLowerCase(); if (SUPPORTED_EXTS.has(ext)) res.push(it.path); }
+        }
+      }
+      collect(entries);
+    } catch(e) { console.error(e); }
+    return res;
   }
 
   async function addFilesToPlaylist(fps) {
@@ -446,10 +421,7 @@
     },
     async openFolder() {
       const sel = await open({ directory: true });
-      if (sel) {
-        const f = await scanFolder(sel);
-        if (f.length) addFilesToPlaylist(f);
-      }
+      if (sel) { const f = await scanFolder(sel); if (f.length) addFilesToPlaylist(f); }
     },
     async togglePlay() {
       if (!state.playlist.length) return;
@@ -480,7 +452,7 @@
         state.currentIndex = -1; state.currentPosition = 0; state.currentDuration = 0;
         document.getElementById('track-title').textContent = '음악을 추가하세요';
         document.getElementById('track-artist').textContent = '';
-        clearFormatBar();
+        document.getElementById('track-file-info').innerHTML = '';
         document.getElementById('progress-fill').style.width = '0%';
       } else if (state.currentIndex > i) state.currentIndex--;
       state.playlist.splice(i, 1);
@@ -492,7 +464,6 @@
       state.playlist = []; state.currentIndex = -1; state.currentPosition = 0; state.currentDuration = 0;
       document.getElementById('track-title').textContent = '음악을 추가하세요';
       document.getElementById('track-artist').textContent = '';
-      clearFormatBar();
       document.getElementById('progress-fill').style.width = '0%';
       document.getElementById('time-current').textContent = '0:00';
       document.getElementById('time-total').textContent = '0:00';
@@ -563,11 +534,48 @@
   // 초기 볼륨 설정
   invoke('audio_set_volume', { volume: state.volume }).catch(console.error);
 
+  // ── 출력 장치 ────────────────────────────────
+  async function loadOutputDevices() {
+    alert('loadOutputDevices 시작');
+    try {
+      const devices = await invoke('audio_list_devices');
+      alert('장치 수: ' + devices.length + '\n' + devices.map(d=>d.name).join('\n'));
+      const sel = document.getElementById('device-select');
+      sel.innerHTML = '';
+      devices.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.name;
+        opt.textContent = d.is_default ? `${d.name} (기본)` : d.name;
+        if (d.is_default) opt.selected = true;
+        sel.appendChild(opt);
+      });
+
+      // onchange 인라인 대신 addEventListener로 등록
+      sel.addEventListener('change', async function() {
+        const deviceName = this.value;
+        alert('장치 변경 시도: ' + deviceName);
+        try {
+          await invoke('audio_set_device', { device_name: deviceName });
+          alert('장치 변경 성공');
+        } catch(e) {
+          alert('장치 변경 실패: ' + String(e));
+        }
+      });
+    } catch(e) {
+      alert('장치 목록 로드 실패: ' + String(e));
+    }
+  }
+
+  window.playerAPI.setOutputDevice = async function(deviceName) {
+    // addEventListener로 처리하므로 이 함수는 유지만
+  };
+
   // ── 유틸 ─────────────────────────────────────
   function formatTime(s) { if (!s || isNaN(s)) return '0:00'; return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`; }
   function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
   // 시작
   drawVU(); buildEQSliders(); renderPlaylist(); requestAnimationFrame(animate);
+  loadOutputDevices();
   console.log('🎵 니콘 친게 뮤직 플레이어 (Rust 고음질 엔진) 로드 완료');
 })();

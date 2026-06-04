@@ -487,11 +487,37 @@
   // 초기 볼륨 설정
   invoke('audio_set_volume', { volume: state.volume }).catch(console.error);
 
+  // ── 출력 장치 ────────────────────────────────
+  async function loadOutputDevices() {
+    try {
+      const devices = await invoke('audio_list_devices');
+      const sel = document.getElementById('device-select');
+      sel.innerHTML = '';
+      devices.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.name;
+        opt.textContent = d.is_default ? `${d.name} (기본)` : d.name;
+        if (d.is_default) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    } catch(e) { console.error('장치 목록 로드 실패', e); }
+  }
+
+  window.playerAPI.setOutputDevice = async function(deviceName) {
+    try {
+      await invoke('audio_set_device', { device_name: deviceName });
+    } catch(e) {
+      console.error('장치 변경 실패', e);
+      alert('출력 장치 변경 실패: ' + e);
+    }
+  };
+
   // ── 유틸 ─────────────────────────────────────
   function formatTime(s) { if (!s || isNaN(s)) return '0:00'; return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`; }
   function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
   // 시작
   drawVU(); buildEQSliders(); renderPlaylist(); requestAnimationFrame(animate);
+  loadOutputDevices();
   console.log('🎵 니콘 친게 뮤직 플레이어 (Rust 고음질 엔진) 로드 완료');
 })();

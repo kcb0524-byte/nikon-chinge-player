@@ -9,11 +9,193 @@
 use parking_lot::Mutex;
 use realfft::RealFftPlanner;
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
+use rodio::cpal::traits::{DeviceTrait, HostTrait};
+use rodio::cpal::{available_hosts, host_from_id};
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
 use std::time::Duration;
 use serde::Serialize;
+
+#[cfg(target_os = "macos")]
+mod ca {
+    use std::os::raw::{c_char, c_void};
+    pub type AudioObjectID = u32;
+    pub type OSStatus = i32;
+    const K_SYSTEM: AudioObjectID = 1;
+    const K_PROP_DEVICES:    u32 = 0x64657623;
+    const K_PROP_DEFAULT_OUT:u32 = 0x644F7574;
+    const K_PROP_NAME:       u32 = 0x6C6E616D;
+    const K_PROP_STREAMS:    u32 = 0x73746D23;
+    const K_SCOPE_GLOBAL:    u32 = 0x676C6F62;
+    const K_SCOPE_OUTPUT:    u32 = 0x6F757470;
+    const K_CF_UTF8:         u32 = 0x08000100;
+    #[repr(C)] struct Addr { sel: u32, scope: u32, elem: u32 }
+    #[link(name="CoreAudio", kind="framework")] extern "C" {
+        fn AudioObjectGetPropertyDataSize(id: AudioObjectID, a: *const Addr, qs: u32, qd: *const c_void, out: *mut u32) -> OSStatus;
+        fn AudioObjectGetPropertyData(id: AudioObjectID, a: *const Addr, qs: u32, qd: *const c_void, sz: *mut u32, data: *mut c_void) -> OSStatus;
+        fn AudioObjectSetPropertyData(id: AudioObjectID, a: *const Addr, qs: u32, qd: *const c_void, sz: u32, data: *const c_void) -> OSStatus;
+    }
+    #[link(name="CoreFoundation", kind="framework")] extern "C" {
+        fn CFStringGetCString(s: *const c_void, buf: *mut c_char, sz: i64, enc: u32) -> u8;
+        fn CFRelease(s: *const c_void);
+    }
+    pub fn find_device(name: &str) -> Option<AudioObjectID> {
+        unsafe {
+            let a = Addr { sel: K_PROP_DEVICES, scope: K_SCOPE_GLOBAL, elem: 0 };
+            let mut sz: u32 = 0;
+            if AudioObjectGetPropertyDataSize(K_SYSTEM, &a, 0, std::ptr::null(), &mut sz) != 0 { return None; }
+            let count = sz as usize / std::mem::size_of::<AudioObjectID>();
+            let mut ids = vec![0u32; count];
+            if AudioObjectGetPropertyData(K_SYSTEM, &a, 0, std::ptr::null(), &mut sz, ids.as_mut_ptr() as *mut c_void) != 0 { return None; }
+            for &id in &ids {
+                let na = Addr { sel: K_PROP_NAME, scope: K_SCOPE_GLOBAL, elem: 0 };
+                let mut cf: *const c_void = std::ptr::null();
+                let mut csz = std::mem::size_of::<*const c_void>() as u32;
+                if AudioObjectGetPropertyData(id, &na, 0, std::ptr::null(), &mut csz, &mut cf as *mut _ as *mut c_void) != 0 || cf.is_null() { continue; }
+                let mut buf = [0i8; 512];
+                let ok = CFStringGetCString(cf, buf.as_mut_ptr(), 512, K_CF_UTF8);
+                CFRelease(cf);
+                if ok == 0 { continue; }
+                let dev_name = std::ffi::CStr::from_ptr(buf.as_ptr()).to_string_lossy();
+                if dev_name != name { continue; }
+                let sa = Addr { sel: K_PROP_STREAMS, scope: K_SCOPE_OUTPUT, elem: 0 };
+                let mut ssz: u32 = 0;
+                AudioObjectGetPropertyDataSize(id, &sa, 0, std::ptr::null(), &mut ssz);
+                if ssz > 0 { return Some(id); }
+            }
+            None
+        }
+    }
+    pub fn set_default_output(id: AudioObjectID) -> bool {
+        unsafe {
+            let a = Addr { sel: K_PROP_DEFAULT_OUT, scope: K_SCOPE_GLOBAL, elem: 0 };
+            AudioObjectSetPropertyData(K_SYSTEM, &a, 0, std::ptr::null(),
+                std::mem::size_of::<AudioObjectID>() as u32,
+                &id as *const _ as *const c_void) == 0
+        }
+    }
+}
+
+
+
+// ─────────────────────────────────────────────
+//  출력 장치 열거
+// ─────────────────────────────────────────────
+#[derive(Serialize, Clone, Debug)]
+pub struct AudioDevice {
+    pub name: String,
+    pub is_default: bool,
+}
+
+pub fn list_output_devices() -> Vec<AudioDevice> {
+    // macOS: system_profiler로 전체 출력 장치 열거
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(devices) = list_output_devices_macos() {
+            if !devices.is_empty() {
+                return devices;
+            }
+        }
+    }
+
+    // Windows / Linux / fallback: cpal
+    list_output_devices_cpal()
+}
+
+#[cfg(target_os = "macos")]
+fn list_output_devices_macos() -> Option<Vec<AudioDevice>> {
+    use std::process::Command;
+    let output = Command::new("system_profiler")
+        .arg("SPAudioDataType")
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    // 기본 장치 이름 (cpal에서 가져옴)
+    let default_name = rodio::cpal::default_host()
+        .default_output_device()
+        .and_then(|d| d.name().ok())
+        .unwrap_or_default();
+
+    let mut devices = Vec::new();
+    let mut current_name: Option<String> = None;
+    let mut has_output = false;
+    let mut is_default = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        // 장치 이름: 들여쓰기 8칸 + 콜론으로 끝남 (섹션 헤더)
+        if line.starts_with("        ") && !line.starts_with("          ") && trimmed.ends_with(':') {
+            // 이전 장치 저장
+            if let Some(name) = current_name.take() {
+                if has_output {
+                    devices.push(AudioDevice { name, is_default });
+                }
+            }
+            current_name = Some(trimmed.trim_end_matches(':').to_string());
+            has_output = false;
+            is_default = false;
+        }
+
+        // 출력 채널 있으면 출력 장치
+        if trimmed.starts_with("Output Channels:") {
+            has_output = true;
+        }
+        // 기본 출력 장치 여부
+        if trimmed.starts_with("Default Output Device: Yes") {
+            is_default = true;
+        }
+    }
+    // 마지막 장치 저장
+    if let Some(name) = current_name {
+        if has_output {
+            devices.push(AudioDevice { name: name.clone(), is_default });
+        }
+    }
+
+    // cpal 기본 장치 이름과 매칭해서 is_default 보정
+    if !default_name.is_empty() {
+        for d in &mut devices {
+            if d.name == default_name { d.is_default = true; }
+        }
+    }
+
+    Some(devices)
+}
+
+fn list_output_devices_cpal() -> Vec<AudioDevice> {
+    let default_host = rodio::cpal::default_host();
+    let default_name = default_host
+        .default_output_device()
+        .and_then(|d| d.name().ok())
+        .unwrap_or_default();
+
+    let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for host_id in available_hosts() {
+        if let Ok(host) = host_from_id(host_id) {
+            if let Ok(devices) = host.output_devices() {
+                for d in devices {
+                    if let Ok(name) = d.name() {
+                        if seen.insert(name.clone()) {
+                            let is_default = name == default_name;
+                            result.push(AudioDevice { name, is_default });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if result.is_empty() && !default_name.is_empty() {
+        result.push(AudioDevice { name: default_name, is_default: true });
+    }
+
+    result
+}
 
 // ─────────────────────────────────────────────
 //  파일 포맷 정보
@@ -589,6 +771,98 @@ impl AudioEngine {
             volume: Arc::new(Mutex::new(VolumeProcessor::new())),
             spectrum: Arc::new(Mutex::new(SpectrumAnalyzer::new())),
         })
+    }
+
+    /// 출력 장치를 이름으로 변경. 재생 중이면 현재 트랙을 새 장치에서 재개.
+    pub fn set_output_device(&mut self, device_name: &str) -> Result<(), String> {
+        // macOS: 시스템 기본 출력만 변경 — 스트림 재연결 없음
+        // rodio는 시스템 기본 출력 변경을 자동으로 따라감
+        #[cfg(target_os = "macos")]
+        {
+            let name_owned = device_name.to_string();
+            let result = std::thread::spawn(move || -> Option<bool> {
+                let id = ca::find_device(&name_owned)?;
+                Some(ca::set_default_output(id))
+            }).join();
+            match result {
+                Ok(Some(true)) => return Ok(()),
+                Ok(Some(false)) => return Err("CoreAudio 장치 변경 실패".to_string()),
+                Ok(None) => return Err(format!("장치를 찾을 수 없습니다: {}", device_name)),
+                Err(_) => return Err("CoreAudio 스레드 오류".to_string()),
+            }
+        }
+
+        // Windows / Linux: cpal로 장치 변경 후 스트림 재연결
+        #[cfg(not(target_os = "macos"))]
+        {
+            let current_path = self.current_path.lock().clone();
+            let current_pos = if let Some(sink) = &*self.sink.lock() {
+                sink.get_pos().as_secs_f64()
+            } else { 0.0 };
+            let was_playing = if let Some(sink) = &*self.sink.lock() {
+                !sink.is_paused()
+            } else { false };
+
+            if let Some(sink) = self.sink.lock().take() { sink.stop(); }
+
+            let (stream, stream_handle) = self.open_stream_for_device(device_name)?;
+            self._stream = stream;
+            self.stream_handle = stream_handle;
+
+            if let Some(path) = current_path {
+                let file = File::open(&path).map_err(|e| e.to_string())?;
+                let buf = BufReader::new(file);
+                let decoder = rodio::Decoder::new(buf)
+                    .map_err(|e| e.to_string())?
+                    .convert_samples::<f32>();
+                let total_duration = decoder.total_duration()
+                    .map(|d| d.as_secs_f64()).unwrap_or(0.0);
+                let hifi = HifiSource::new(
+                    decoder, Arc::clone(&self.eq),
+                    Arc::clone(&self.volume), Arc::clone(&self.spectrum),
+                );
+                let sink = Sink::try_new(&self.stream_handle)
+                    .map_err(|e| e.to_string())?;
+                sink.pause();
+                sink.append(hifi);
+                std::thread::sleep(Duration::from_millis(100));
+                let _ = sink.try_seek(Duration::from_secs_f64(current_pos));
+                if was_playing { sink.play(); } else { sink.pause(); }
+                *self.sink.lock() = Some(sink);
+                *self.current_path.lock() = Some(path);
+                *self.duration.lock() = Some(total_duration);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn open_stream_for_device(&self, device_name: &str) -> Result<(OutputStream, OutputStreamHandle), String> {
+        if device_name.is_empty() {
+            return OutputStream::try_default().map_err(|e| e.to_string());
+        }
+
+        // macOS: CoreAudio FFI로 시스템 기본 출력 장치 변경 → try_default()
+        #[cfg(target_os = "macos")]
+        {
+            let name_owned = device_name.to_string();
+            let result = std::thread::spawn(move || -> Option<bool> {
+                let id = ca::find_device(&name_owned)?;
+                Some(ca::set_default_output(id))
+            }).join();
+            match result {
+                Ok(Some(true)) => {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    return OutputStream::try_default().map_err(|e| e.to_string());
+                }
+                Ok(Some(false)) =>
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(format!("장치를 찾을 수 없습니다: {}", device_name))
     }
 
     pub fn play(&self, path: &str) -> Result<f64, String> {

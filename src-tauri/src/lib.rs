@@ -109,6 +109,20 @@ fn audio_get_rms(state: State<AppAudio>) -> Vec<f32> {
     vec![l, r]
 }
 
+// ── 출력 장치 ──────────────────────────────────
+/// 사용 가능한 출력 장치 목록 반환
+#[tauri::command]
+fn audio_list_devices() -> Vec<audio::AudioDevice> {
+    audio::list_output_devices()
+}
+
+/// 출력 장치 변경 (device_name: 빈 문자열이면 기본 장치)
+#[tauri::command]
+fn audio_set_device(device_name: String, state: State<AppAudio>) -> Result<(), String> {
+    let result = state.inner().0.lock().set_output_device(&device_name);
+    result
+}
+
 // ── 파일 정보 ──────────────────────────────────
 #[tauri::command]
 fn audio_get_file_info(path: String) -> Option<audio::FileInfo> {
@@ -198,6 +212,8 @@ pub fn run() {
             audio_get_rms,
             scan_folder,
             audio_get_file_info,
+            audio_list_devices,
+            audio_set_device,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
