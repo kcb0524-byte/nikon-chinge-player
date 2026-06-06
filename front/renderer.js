@@ -117,14 +117,9 @@
     const bc=spectrumData.length, bw=(w/bc)-1;
     for(let i=0;i<bc;i++){
       const val=spectrumData[i]||0, bh=val*h*0.95;
-      // 저역: 청록 → 고역: 그린으로 그라디언트
-      const t=i/bc;
-      const r=Math.round(0*(1-t)+82*t);
-      const g2=Math.round(180*(1-t)+183*t);
-      const b=Math.round(216*(1-t)+136*t);
+      const hue=25+(i/bc)*20;
       const g=specCtx.createLinearGradient(0,h-bh,0,h);
-      g.addColorStop(0,`rgba(${r},${g2},${b},0.95)`);
-      g.addColorStop(1,`rgba(${r},${g2},${b},0.15)`);
+      g.addColorStop(0,`hsla(${hue},80%,65%,0.9)`);g.addColorStop(1,`hsla(${hue},60%,35%,0.3)`);
       specCtx.fillStyle=g; specCtx.fillRect(i*(bw+1),h-bh,bw,bh);
     }
   }
@@ -138,23 +133,23 @@
     const bg=ctx.createLinearGradient(bx,by,bx,by+bH);
     bg.addColorStop(0,'#f0ebe0');bg.addColorStop(1,'#d8d0c0');
     ctx.fillStyle=bg;ctx.fillRect(bx,by,bW,bH);
-    ctx.strokeStyle='#e76f51';ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bW,bH);
+    ctx.strokeStyle='#8a7a60';ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bW,bH);
     ctx.restore();
     const cx=bx+bW/2,cy=by+bH+8,R=bH*1.05,sA=Math.PI,eA=Math.PI*2,sp=eA-sA;
     ctx.save();ctx.beginPath();ctx.rect(bx,by,bW,bH);ctx.clip();
-    ctx.save();ctx.beginPath();ctx.arc(cx,cy,R*0.9,sA+sp*0.8,eA);ctx.lineTo(cx,cy);ctx.closePath();ctx.fillStyle='rgba(231,111,81,0.10)';ctx.fill();ctx.restore();
+    ctx.save();ctx.beginPath();ctx.arc(cx,cy,R*0.9,sA+sp*0.8,eA);ctx.lineTo(cx,cy);ctx.closePath();ctx.fillStyle='rgba(200,50,20,0.12)';ctx.fill();ctx.restore();
     [{t:0,txt:'-20',mj:true},{t:0.20,txt:'-10',mj:true},{t:0.38,txt:'-7',mj:false},{t:0.52,txt:'-5',mj:true},{t:0.65,txt:'-3',mj:false},{t:0.77,txt:'0',mj:true},{t:0.88,txt:'+2',mj:false},{t:1,txt:'+3',mj:true}].forEach(({t,txt,mj})=>{
       const a=sA+t*sp,isR=t>=0.77;
       ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*R*(mj?0.68:0.74),cy+Math.sin(a)*R*(mj?0.68:0.74));ctx.lineTo(cx+Math.cos(a)*R*0.88,cy+Math.sin(a)*R*0.88);
-      ctx.strokeStyle=isR?'#e76f51':'#444430';ctx.lineWidth=mj?1.8:0.9;ctx.stroke();
-      if(mj){ctx.fillStyle=isR?'#e76f51':'#333320';ctx.font=`bold ${Math.max(8,bH*0.11)}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(txt,cx+Math.cos(a)*R*0.57,cy+Math.sin(a)*R*0.57);}
+      ctx.strokeStyle=isR?'#c02010':'#444430';ctx.lineWidth=mj?1.8:0.9;ctx.stroke();
+      if(mj){ctx.fillStyle=isR?'#c02010':'#333320';ctx.font=`bold ${Math.max(8,bH*0.11)}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(txt,cx+Math.cos(a)*R*0.57,cy+Math.sin(a)*R*0.57);}
     });
     ctx.fillStyle='#222210';ctx.font=`bold ${Math.max(9,bH*0.13)}px Georgia,serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('VU',cx,by+bH*0.30);
-    ctx.font=`${Math.max(8,bH*0.10)}px sans-serif`;ctx.fillStyle='#e76f51';ctx.fillText(label,cx,by+bH*0.48);
+    ctx.font=`${Math.max(8,bH*0.10)}px sans-serif`;ctx.fillStyle='#666650';ctx.fillText(label,cx,by+bH*0.48);
     const nA=sA+needle.angle*sp,nL=R*0.86;
     ctx.beginPath();ctx.moveTo(cx+Math.cos(nA+Math.PI)*R*0.14,cy+Math.sin(nA+Math.PI)*R*0.14);ctx.lineTo(cx+Math.cos(nA)*nL,cy+Math.sin(nA)*nL);
-    ctx.strokeStyle='#f4a261';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.stroke();
-    ctx.beginPath();ctx.arc(cx,cy,5,0,Math.PI*2);ctx.fillStyle='#e76f51';ctx.fill();
+    ctx.strokeStyle='#bb1100';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.stroke();
+    ctx.beginPath();ctx.arc(cx,cy,5,0,Math.PI*2);ctx.fillStyle='#555540';ctx.fill();
     ctx.restore();
   }
 
@@ -211,12 +206,15 @@
   }
 
   // ── 재생 위치 추적 ────────────────────────────
+  let isSeeking = false; // seek 중 positionTimer 업데이트 차단 플래그
+
   function startPositionTracking() {
     stopPositionTracking();
     state.positionTimer = setInterval(async () => {
-      if (!state.isPlaying) return;
+      if (!state.isPlaying || isSeeking) return;
       try {
         const pos = await invoke('audio_get_position');
+        if (isSeeking) return; // invoke 대기 중에 seek 시작됐으면 무시
         state.currentPosition = pos;
         updateProgressUI(pos, state.currentDuration);
         const finished = await invoke('audio_is_finished');
@@ -287,49 +285,8 @@
     document.querySelectorAll('.pl-item').forEach((el, i) => el.classList.toggle('active', i === index));
     const items = document.querySelectorAll('.pl-item');
     if (items[index]) items[index].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    // 파일명에서 곡명/가수 파싱 (예: "아티스트 - 곡명.flac")
-    const nameNoExt = t.name.replace(/\.[^.]+$/, '');
-    const dashIdx = nameNoExt.indexOf(' - ');
-    let trackTitle = nameNoExt, trackArtist = '';
-    if (dashIdx > 0) {
-      trackArtist = nameNoExt.slice(0, dashIdx).trim();
-      trackTitle  = nameNoExt.slice(dashIdx + 3).trim();
-    }
-    document.getElementById('track-title').textContent = trackTitle;
-    document.getElementById('track-artist').textContent = trackArtist;
-    document.getElementById('track-file-info').innerHTML = '';
-
-    // 파일 정보 뱃지 비동기 로드
-    invoke('audio_get_file_info', { path: t.path }).then(info => {
-      if (!info) return;
-      const el = document.getElementById('track-file-info');
-      if (!el) return;
-      const badges = [];
-      // 포맷 뱃지
-      const isLossless = info.is_lossless;
-      badges.push(`<span class="track-badge format">${info.format}</span>`);
-      // 무손실 여부
-      if (isLossless) {
-        badges.push(`<span class="track-badge lossless">LOSSLESS</span>`);
-      }
-      // 비트뎁스
-      if (info.bit_depth > 0) {
-        badges.push(`<span class="track-badge info">${info.bit_depth}bit</span>`);
-      }
-      // 샘플레이트
-      if (info.sample_rate > 0) {
-        const sr = info.sample_rate % 1000 === 0
-          ? `${info.sample_rate/1000}kHz`
-          : `${(info.sample_rate/1000).toFixed(1)}kHz`;
-        badges.push(`<span class="track-badge info">${sr}</span>`);
-      }
-      // 비트레이트 (손실 압축만)
-      if (!isLossless && info.bitrate_kbps > 0) {
-        badges.push(`<span class="track-badge lossy">${info.bitrate_kbps}kbps</span>`);
-      }
-      el.innerHTML = badges.join('');
-    }).catch(() => {});
-
+    document.getElementById('track-title').textContent = t.name;
+    document.getElementById('track-artist').textContent = t.ext.toUpperCase() + ' • 니콘 친게 뮤직 플레이어';
     try {
       const duration = await invoke('audio_play', { path: t.path });
       state.currentDuration = duration;
@@ -348,15 +305,80 @@
     if (!p) stopPositionTracking();
   }
 
-  // ── 진행바 ───────────────────────────────────
-  document.getElementById('progress-wrap').addEventListener('click', async e => {
-    if (!state.currentDuration) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    const seconds = ((e.clientX - r.left) / r.width) * state.currentDuration;
-    await invoke('audio_seek', { seconds });
-    state.currentPosition = seconds;
-    updateProgressUI(seconds, state.currentDuration);
-  });
+  // ── 진행바 (클릭 + 드래그 시크) ─────────────
+  (function() {
+    const wrap = document.getElementById('progress-wrap');
+    let seeking = false;
+
+    function calcSeconds(clientX) {
+      const r = wrap.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+      return ratio * state.currentDuration;
+    }
+
+    function beginSeek(clientX) {
+      if (!state.currentDuration) return;
+      seeking = true;
+      isSeeking = true;
+      const seconds = calcSeconds(clientX);
+      document.getElementById('progress-fill').style.transition = 'none';
+      updateProgressUI(seconds, state.currentDuration);
+      state.currentPosition = seconds;
+    }
+
+    function moveSeek(clientX) {
+      if (!seeking || !state.currentDuration) return;
+      const seconds = calcSeconds(clientX);
+      updateProgressUI(seconds, state.currentDuration);
+      state.currentPosition = seconds;
+    }
+
+    async function endSeek(clientX) {
+      if (!seeking) return;
+      seeking = false;
+      document.getElementById('progress-fill').style.transition = '';
+      if (!state.currentDuration) { isSeeking = false; return; }
+      const seconds = calcSeconds(clientX);
+      updateProgressUI(seconds, state.currentDuration);
+      state.currentPosition = seconds;
+      try {
+        await invoke('audio_seek', { seconds });
+      } catch(e) { console.error(e); }
+      isSeeking = false;
+    }
+
+    wrap.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      beginSeek(e.clientX);
+    });
+
+    document.addEventListener('mousemove', e => {
+      moveSeek(e.clientX);
+    });
+
+    document.addEventListener('mouseup', e => {
+      if (!seeking) return;
+      endSeek(e.clientX);
+    });
+
+    // 터치 지원
+    wrap.addEventListener('touchstart', e => {
+      e.preventDefault();
+      beginSeek(e.touches[0].clientX);
+    }, { passive: false });
+
+    document.addEventListener('touchmove', e => {
+      if (!seeking) return;
+      moveSeek(e.touches[0].clientX);
+    }, { passive: true });
+
+    document.addEventListener('touchend', e => {
+      if (!seeking) return;
+      const touch = e.changedTouches[0];
+      endSeek(touch.clientX);
+    });
+  })();
 
   // ── 볼륨 슬라이더 ────────────────────────────
   // 슬라이더 0~100 → Rust에서 dB 변환 (심리음향학적 로그 스케일)
@@ -402,15 +424,29 @@
 
   async function addFilesToPlaylist(fps) {
     const was = state.playlist.length === 0;
+    const newTracks = [];
     for (const fp of fps) {
       if (state.playlist.some(t => t.path === fp)) continue;
       const parts = fp.replace(/\\/g, '/').split('/');
       const bn = parts[parts.length - 1];
       const ext = bn.split('.').pop().toLowerCase();
-      state.playlist.push({ path: fp, name: bn.replace(/\.[^.]+$/, ''), ext, duration: null });
+      const track = { path: fp, name: bn.replace(/\.[^.]+$/, ''), ext, duration: null };
+      state.playlist.push(track);
+      newTracks.push(track);
     }
     renderPlaylist();
     if (was && state.playlist.length) loadAndPlay(0);
+    // duration을 백그라운드에서 순차적으로 로드 (UI를 블로킹하지 않음)
+    for (const track of newTracks) {
+      if (track.duration !== null) continue;
+      try {
+        const dur = await invoke('audio_get_file_duration', { path: track.path });
+        if (dur > 0) {
+          track.duration = dur;
+          renderPlaylist();
+        }
+      } catch(e) { /* duration 로드 실패 시 '--:--' 유지 */ }
+    }
   }
 
   // ── Public API ───────────────────────────────
@@ -452,7 +488,6 @@
         state.currentIndex = -1; state.currentPosition = 0; state.currentDuration = 0;
         document.getElementById('track-title').textContent = '음악을 추가하세요';
         document.getElementById('track-artist').textContent = '';
-        document.getElementById('track-file-info').innerHTML = '';
         document.getElementById('progress-fill').style.width = '0%';
       } else if (state.currentIndex > i) state.currentIndex--;
       state.playlist.splice(i, 1);
@@ -536,10 +571,8 @@
 
   // ── 출력 장치 ────────────────────────────────
   async function loadOutputDevices() {
-    alert('loadOutputDevices 시작');
     try {
       const devices = await invoke('audio_list_devices');
-      alert('장치 수: ' + devices.length + '\n' + devices.map(d=>d.name).join('\n'));
       const sel = document.getElementById('device-select');
       sel.innerHTML = '';
       devices.forEach(d => {
@@ -549,25 +582,16 @@
         if (d.is_default) opt.selected = true;
         sel.appendChild(opt);
       });
-
-      // onchange 인라인 대신 addEventListener로 등록
-      sel.addEventListener('change', async function() {
-        const deviceName = this.value;
-        alert('장치 변경 시도: ' + deviceName);
-        try {
-          await invoke('audio_set_device', { device_name: deviceName });
-          alert('장치 변경 성공');
-        } catch(e) {
-          alert('장치 변경 실패: ' + String(e));
-        }
-      });
-    } catch(e) {
-      alert('장치 목록 로드 실패: ' + String(e));
-    }
+    } catch(e) { console.error('장치 목록 로드 실패', e); }
   }
 
   window.playerAPI.setOutputDevice = async function(deviceName) {
-    // addEventListener로 처리하므로 이 함수는 유지만
+    try {
+      await invoke('audio_set_device', { device_name: deviceName });
+    } catch(e) {
+      console.error('장치 변경 실패', e);
+      alert('출력 장치 변경 실패: ' + e);
+    }
   };
 
   // ── 유틸 ─────────────────────────────────────

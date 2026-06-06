@@ -129,6 +129,13 @@ fn audio_get_file_info(path: String) -> Option<audio::FileInfo> {
     audio::get_file_info(&path)
 }
 
+/// 재생 없이 파일의 총 재생 시간(초)만 반환 — 플레이리스트 duration 표시용
+#[tauri::command]
+fn audio_get_file_duration(path: String) -> f64 {
+    // v2
+    audio::get_file_duration(&path)
+}
+
 // ── 폴더 스캔 (Rust에서 직접 — JS fs 권한 우회) ──
 const SUPPORTED_EXTS: &[&str] = &[
     "mp3","flac","wav","aac","m4a","ogg","opus","wma",
@@ -143,12 +150,14 @@ fn scan_dir_recursive(dir: &Path, result: &mut Vec<String>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
-            scan_dir_recursive(&path, result);
-        } else if let Some(ext) = path.extension() {
+        // canonicalize로 심볼릭 링크/상대경로 모두 실제 절대경로로 통일
+        let canon = std::fs::canonicalize(&path).unwrap_or(path.clone());
+        if canon.is_dir() {
+            scan_dir_recursive(&canon, result);
+        } else if let Some(ext) = canon.extension() {
             let ext_lower = ext.to_string_lossy().to_lowercase();
             if SUPPORTED_EXTS.contains(&ext_lower.as_str()) {
-                if let Some(s) = path.to_str() {
+                if let Some(s) = canon.to_str() {
                     result.push(s.to_string());
                 }
             }
@@ -160,19 +169,21 @@ fn scan_dir_recursive(dir: &Path, result: &mut Vec<String>) {
 #[tauri::command]
 fn scan_folder(path: String) -> Vec<String> {
     let p = Path::new(&path);
-    if p.is_file() {
-        // 단일 파일이면 그냥 반환
-        let ext = p.extension()
+    // canonicalize로 실제 절대경로로 통일
+    let canon = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if canon.is_file() {
+        let ext = canon.extension()
             .map(|e| e.to_string_lossy().to_lowercase())
             .unwrap_or_default();
         if SUPPORTED_EXTS.contains(&ext.as_str()) {
-            return vec![path];
+            return vec![canon.to_string_lossy().to_string()];
         }
         return vec![];
     }
     let mut result = Vec::new();
-    scan_dir_recursive(p, &mut result);
+    scan_dir_recursive(&canon, &mut result);
     result.sort();
+    result.dedup(); // 혹시 중복 경로 제거
     result
 }
 
@@ -212,9 +223,12 @@ pub fn run() {
             audio_get_rms,
             scan_folder,
             audio_get_file_info,
+            audio_get_file_duration,
             audio_list_devices,
             audio_set_device,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+ 
+ 

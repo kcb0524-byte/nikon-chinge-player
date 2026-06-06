@@ -211,6 +211,52 @@ pub struct FileInfo {
     pub label: String,        // "24bit / 96kHz / FLAC" 같은 표시용 문자열
 }
 
+/// 파일을 열어 재생 시간(초)만 반환. 재생 없이 플레이리스트 표시용으로 사용.
+pub fn get_file_duration(path: &str) -> f64 {
+    use rodio::Decoder;
+    // 1차: rodio decoder total_duration
+    if let Ok(file) = File::open(path) {
+        let buf = BufReader::new(file);
+        if let Ok(decoder) = Decoder::new(buf) {
+            if let Some(d) = decoder.total_duration() {
+                let secs = d.as_secs_f64();
+                if secs > 0.1 { return secs; }
+            }
+        }
+    }
+    // 2차 fallback: symphonia로 직접 파싱 (Windows에서 mp3/flac duration 0 대응)
+    get_file_duration_symphonia(path)
+}
+
+fn get_file_duration_symphonia(path: &str) -> f64 {
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+    let file = match File::open(path) { Ok(f) => f, Err(_) => return 0.0 };
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = std::path::Path::new(path).extension() {
+        hint.with_extension(&ext.to_string_lossy());
+    }
+    let probed = match symphonia::default::get_probe().format(
+        &hint, mss,
+        &FormatOptions::default(),
+        &MetadataOptions::default(),
+    ) { Ok(p) => p, Err(_) => return 0.0 };
+    let format = probed.format;
+    // 트랙의 time_base + n_frames로 duration 계산
+    for track in format.tracks() {
+        if let Some(tb) = track.codec_params.time_base {
+            if let Some(n) = track.codec_params.n_frames {
+                let secs = n as f64 * tb.numer as f64 / tb.denom as f64;
+                if secs > 0.1 { return secs; }
+            }
+        }
+    }
+    0.0
+}
+
 pub fn get_file_info(path: &str) -> Option<FileInfo> {
     use rodio::Decoder;
     let file = File::open(path).ok()?;
@@ -638,10 +684,19 @@ impl SpectrumAnalyzer {
 
         let bin_count = out_l.len();
         let mut result = vec![0.0f32; SPECTRUM_BANDS];
+
+        // 로그 스케일 주파수 매핑 (인간 청각 특성에 맞게)
+        let min_bin = 1usize;
+        let max_bin = (bin_count as f32 * 0.90) as usize;
+        let log_min = (min_bin as f32).ln();
+        let log_max = (max_bin as f32).ln();
+
         for i in 0..SPECTRUM_BANDS {
-            let start = ((i as f32 / SPECTRUM_BANDS as f32) * (bin_count as f32 * 0.7)) as usize;
-            let end = (((i + 1) as f32 / SPECTRUM_BANDS as f32) * (bin_count as f32 * 0.7)) as usize;
-            let end = end.max(start + 1).min(bin_count);
+            let t0 = i as f32 / SPECTRUM_BANDS as f32;
+            let t1 = (i + 1) as f32 / SPECTRUM_BANDS as f32;
+            let start = (log_min + t0 * (log_max - log_min)).exp() as usize;
+            let end = ((log_min + t1 * (log_max - log_min)).exp() as usize)
+                .max(start + 1).min(bin_count);
             let count = (end - start) as f32;
             let mut sum = 0.0f32;
             for j in start..end {
@@ -650,8 +705,9 @@ impl SpectrumAnalyzer {
                 sum += (mag_l + mag_r) / 2.0;
             }
             let avg = sum / count;
-            let db = if avg > 1e-10 { 20.0 * avg.log10() } else { -80.0 };
-            result[i] = ((db + 80.0) / 80.0).max(0.0).min(1.0);
+            let avg_norm = avg / SPECTRUM_SIZE as f32;
+            let db = if avg_norm > 1e-10 { 20.0 * avg_norm.log10() } else { -90.0 };
+            result[i] = ((db + 90.0) / 80.0).max(0.0).min(1.0);
         }
         result
     }
@@ -668,6 +724,71 @@ impl SpectrumAnalyzer {
             sum_r += self.buffer_r[idx] * self.buffer_r[idx];
         }
         ((sum_l / window as f32).sqrt(), (sum_r / window as f32).sqrt())
+    }
+}
+
+// ─────────────────────────────────────────────
+//  PCM 캐시 소스 — 전체 샘플을 미리 디코딩하여
+//  seek가 즉각적으로 동작 (인덱스 이동만)
+// ─────────────────────────────────────────────
+pub struct PcmSource {
+    samples: Arc<Vec<f32>>,
+    pos: usize,
+    channels: u16,
+    sample_rate: u32,
+}
+
+impl PcmSource {
+    /// 디코더로부터 전체 샘플을 Vec<f32>에 수집
+    pub fn from_decoder<S>(decoder: S) -> (Arc<Vec<f32>>, u16, u32)
+    where
+        S: Source<Item = f32>,
+    {
+        let channels = decoder.channels();
+        let sample_rate = decoder.sample_rate();
+        let samples: Vec<f32> = decoder.collect();
+        (Arc::new(samples), channels, sample_rate)
+    }
+
+    pub fn new(samples: Arc<Vec<f32>>, channels: u16, sample_rate: u32) -> Self {
+        PcmSource { samples, pos: 0, channels, sample_rate }
+    }
+
+    pub fn new_at(samples: Arc<Vec<f32>>, channels: u16, sample_rate: u32, start_sec: f64) -> Self {
+        let frame = (start_sec * sample_rate as f64) as usize;
+        let pos = (frame * channels as usize).min(samples.len());
+        PcmSource { samples, pos, channels, sample_rate }
+    }
+
+    pub fn total_duration_secs(&self) -> f64 {
+        self.samples.len() as f64 / self.channels as f64 / self.sample_rate as f64
+    }
+}
+
+impl Iterator for PcmSource {
+    type Item = f32;
+    fn next(&mut self) -> Option<f32> {
+        if self.pos < self.samples.len() {
+            let s = self.samples[self.pos];
+            self.pos += 1;
+            Some(s)
+        } else {
+            None
+        }
+    }
+}
+
+impl Source for PcmSource {
+    fn current_frame_len(&self) -> Option<usize> { None }
+    fn channels(&self) -> u16 { self.channels }
+    fn sample_rate(&self) -> u32 { self.sample_rate }
+    fn total_duration(&self) -> Option<Duration> {
+        Some(Duration::from_secs_f64(self.total_duration_secs()))
+    }
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        let frame = (pos.as_secs_f64() * self.sample_rate as f64) as usize;
+        self.pos = (frame * self.channels as usize).min(self.samples.len());
+        Ok(())
     }
 }
 
@@ -735,6 +856,9 @@ impl<S: Source<Item = f32>> Source for HifiSource<S> {
     fn channels(&self) -> u16 { self.inner.channels() }
     fn sample_rate(&self) -> u32 { self.inner.sample_rate() }
     fn total_duration(&self) -> Option<Duration> { self.inner.total_duration() }
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        self.inner.try_seek(pos)
+    }
 }
 
 // ─────────────────────────────────────────────
@@ -745,7 +869,12 @@ pub struct AudioEngine {
     _stream: OutputStream,
     stream_handle: OutputStreamHandle,
     current_path: Arc<Mutex<Option<String>>>,
+    // 디코딩된 PCM 샘플 캐시 (seek 즉각 처리용)
+    pcm_cache: Arc<Mutex<Option<Arc<Vec<f32>>>>>,
+    pcm_channels: Arc<Mutex<u16>>,
+    pcm_sample_rate: Arc<Mutex<u32>>,
     duration: Arc<Mutex<Option<f64>>>,
+    seek_offset: Arc<Mutex<f64>>,  // seek 후 get_pos() 보정값
 
     pub eq: Arc<Mutex<EqProcessor>>,
     pub volume: Arc<Mutex<VolumeProcessor>>,
@@ -766,7 +895,11 @@ impl AudioEngine {
             _stream: stream,
             stream_handle,
             current_path: Arc::new(Mutex::new(None)),
+            pcm_cache: Arc::new(Mutex::new(None)),
+            pcm_channels: Arc::new(Mutex::new(2)),
+            pcm_sample_rate: Arc::new(Mutex::new(44100)),
             duration: Arc::new(Mutex::new(None)),
+            seek_offset: Arc::new(Mutex::new(0.0)),
             eq: Arc::new(Mutex::new(EqProcessor::new(44100.0))),
             volume: Arc::new(Mutex::new(VolumeProcessor::new())),
             spectrum: Arc::new(Mutex::new(SpectrumAnalyzer::new())),
@@ -810,9 +943,12 @@ impl AudioEngine {
             self.stream_handle = stream_handle;
 
             if let Some(path) = current_path {
-                let file = File::open(&path).map_err(|e| e.to_string())?;
-                let buf = BufReader::new(file);
-                let decoder = rodio::Decoder::new(buf)
+                use std::io::{Cursor, Read};
+                let mut file = File::open(&path).map_err(|e| e.to_string())?;
+                let mut data = Vec::new();
+                file.read_to_end(&mut data).map_err(|e| e.to_string())?;
+                let cursor = Cursor::new(data);
+                let decoder = rodio::Decoder::new(cursor)
                     .map_err(|e| e.to_string())?
                     .convert_samples::<f32>();
                 let total_duration = decoder.total_duration()
@@ -863,15 +999,23 @@ impl AudioEngine {
     pub fn play(&self, path: &str) -> Result<f64, String> {
         if let Some(sink) = self.sink.lock().take() { sink.stop(); }
 
-        let file = File::open(path).map_err(|e| format!("파일 열기 실패: {}", e))?;
-        let buf = BufReader::new(file);
-        let decoder = rodio::Decoder::new(buf)
+        // 파일 전체를 메모리로 읽기 (IO만, 디코딩 전)
+        use std::io::{Cursor, Read};
+        let mut file = File::open(path).map_err(|e| format!("파일 열기 실패: {}", e))?;
+        let mut raw = Vec::new();
+        file.read_to_end(&mut raw).map_err(|e| format!("파일 읽기 실패: {}", e))?;
+        let raw = Arc::new(raw);
+
+        // 1단계: Cursor로 즉시 재생 (try_seek 가능 — Cursor는 Seek 구현)
+        let cursor1 = Cursor::new((*raw).clone());
+        let decoder = rodio::Decoder::new(cursor1)
             .map_err(|e| format!("디코딩 실패: {}", e))?
             .convert_samples::<f32>();
 
+        let channels = decoder.channels();
+        let sample_rate = decoder.sample_rate();
         let total_duration = decoder.total_duration()
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(0.0);
+            .map(|d| d.as_secs_f64()).unwrap_or(0.0);
 
         let hifi = HifiSource::new(
             decoder,
@@ -879,7 +1023,6 @@ impl AudioEngine {
             Arc::clone(&self.volume),
             Arc::clone(&self.spectrum),
         );
-
         let sink = Sink::try_new(&self.stream_handle)
             .map_err(|e| format!("Sink 생성 실패: {}", e))?;
         sink.append(hifi);
@@ -887,7 +1030,29 @@ impl AudioEngine {
 
         *self.sink.lock() = Some(sink);
         *self.current_path.lock() = Some(path.to_string());
+        *self.pcm_cache.lock() = None;
+        *self.pcm_channels.lock() = channels;
+        *self.pcm_sample_rate.lock() = sample_rate;
         *self.duration.lock() = Some(total_duration);
+        *self.seek_offset.lock() = 0.0;
+
+        // 2단계: 백그라운드에서 PCM 캐시 준비 (이후 seek 즉각 처리용)
+        let raw2 = Arc::clone(&raw);
+        let pcm_cache = Arc::clone(&self.pcm_cache);
+        let pcm_ch = Arc::clone(&self.pcm_channels);
+        let pcm_sr = Arc::clone(&self.pcm_sample_rate);
+        std::thread::spawn(move || {
+            let cursor2 = Cursor::new((*raw2).clone());
+            if let Ok(dec2) = rodio::Decoder::new(cursor2) {
+                let dec2 = dec2.convert_samples::<f32>();
+                let ch = dec2.channels();
+                let sr = dec2.sample_rate();
+                let (pcm, _, _) = PcmSource::from_decoder(dec2);
+                *pcm_cache.lock() = Some(pcm);
+                *pcm_ch.lock() = ch;
+                *pcm_sr.lock() = sr;
+            }
+        });
 
         Ok(total_duration)
     }
@@ -935,14 +1100,43 @@ impl AudioEngine {
 
     pub fn get_position(&self) -> f64 {
         if let Some(sink) = &*self.sink.lock() {
-            sink.get_pos().as_secs_f64()
+            sink.get_pos().as_secs_f64() + *self.seek_offset.lock()
         } else { 0.0 }
     }
 
     pub fn seek(&self, seconds: f64) -> Result<(), String> {
-        if let Some(sink) = &*self.sink.lock() {
-            sink.try_seek(Duration::from_secs_f64(seconds))
-                .map_err(|e| format!("Seek 실패: {}", e))?;
+        let pcm_opt = self.pcm_cache.lock().clone();
+        let was_playing = self.sink.lock().as_ref().map(|s| !s.is_paused()).unwrap_or(false);
+
+        match pcm_opt {
+            Some(pcm) => {
+                // PCM 캐시 준비됨 — 즉각 seek
+                let channels = *self.pcm_channels.lock();
+                let sample_rate = *self.pcm_sample_rate.lock();
+                if let Some(sink) = self.sink.lock().take() { sink.stop(); }
+                let source = PcmSource::new_at(Arc::clone(&pcm), channels, sample_rate, seconds);
+                let hifi = HifiSource::new(
+                    source,
+                    Arc::clone(&self.eq),
+                    Arc::clone(&self.volume),
+                    Arc::clone(&self.spectrum),
+                );
+                let sink = rodio::Sink::try_new(&self.stream_handle).map_err(|e| e.to_string())?;
+                sink.append(hifi);
+                if was_playing { sink.play(); } else { sink.pause(); }
+                // 새 sink는 0부터 카운트 → seek 위치를 offset으로 보정
+                *self.seek_offset.lock() = seconds;
+                *self.sink.lock() = Some(sink);
+            }
+            None => {
+                // PCM 캐시 준비 중 — Cursor 기반 decoder라 try_seek 성공
+                let try_ok = if let Some(sink) = &*self.sink.lock() {
+                    sink.try_seek(Duration::from_secs_f64(seconds)).is_ok()
+                } else { false };
+                // try_seek 성공 시 get_pos()가 seek 위치부터 카운트 → offset 0
+                // try_seek 실패 시 offset으로 보정
+                *self.seek_offset.lock() = if try_ok { 0.0 } else { seconds };
+            }
         }
         Ok(())
     }

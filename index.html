@@ -148,18 +148,25 @@
 
   .progress-section { width: 100%; display: flex; flex-direction: column; gap: 4px; }
   .progress-bar-wrap {
-    position: relative; height: 4px; background: var(--bg-card2);
+    position: relative; height: 16px; background: transparent;
     border-radius: 2px; cursor: pointer; overflow: visible;
+    display: flex; align-items: center;
+  }
+  .progress-bar-track {
+    position: absolute; left: 0; right: 0; height: 4px;
+    background: var(--bg-card2); border-radius: 2px; overflow: hidden;
   }
   .progress-bar-fill {
     height: 100%; background: linear-gradient(90deg, var(--wood), var(--accent), var(--accent2));
-    border-radius: 2px; width: 0%; transition: width 0.1s linear;
+    border-radius: 2px; width: 0%; transition: width 0.05s linear;
+    position: relative;
   }
-  .progress-bar-wrap:hover .progress-bar-fill::after {
+  .progress-bar-fill::after {
     content: ''; position: absolute; right: -5px; top: 50%; transform: translateY(-50%);
     width: 10px; height: 10px; background: var(--accent2); border-radius: 50%;
-    box-shadow: 0 0 8px var(--glow);
+    box-shadow: 0 0 8px var(--glow); opacity: 0; transition: opacity 0.2s;
   }
+  .progress-bar-wrap:hover .progress-bar-fill::after { opacity: 1; }
   .progress-times {
     display: flex; justify-content: space-between;
     font-size: 11px; color: var(--text-muted);
@@ -469,7 +476,9 @@
 
         <div class="progress-section">
           <div class="progress-bar-wrap" id="progress-wrap">
-            <div class="progress-bar-fill" id="progress-fill"></div>
+            <div class="progress-bar-track">
+              <div class="progress-bar-fill" id="progress-fill"></div>
+            </div>
           </div>
           <div class="progress-times">
             <span id="time-current">0:00</span>
@@ -783,7 +792,7 @@
     drawLP(); drawSpectrum();
     updateVU(vuNeedleL, state.isPlaying?rmsL:0);
     updateVU(vuNeedleR, state.isPlaying?rmsR:0);
-    alert("APP LOADED"); drawVU();
+    drawVU();
     if (ts-lastSpectrumFetch>33) { lastSpectrumFetch=ts; fetchAudioData(); }
   }
 
@@ -792,8 +801,14 @@
     state.positionTimer = setInterval(async () => {
       if (!state.isPlaying) return;
       try {
+        if (isSeeking) return;
         const pos = await invoke('audio_get_position');
+        if (isSeeking) return; // invoke 대기 중 seek 시작됐으면 무시
         state.currentPosition = pos;
+        // duration이 0이면 재시도 (Windows MP3 등)
+        if (!state.currentDuration || state.currentDuration === 0) {
+          state.currentDuration = await invoke('audio_get_duration').catch(() => 0);
+        }
         updateProgressUI(pos, state.currentDuration);
         const finished = await invoke('audio_is_finished');
         if (finished) onTrackFinished();
@@ -873,7 +888,12 @@
       el.innerHTML=badges.join('');
     }).catch(()=>{});
     try {
-      const duration=await invoke('audio_play',{path:t.path});
+      let duration=await invoke('audio_play',{path:t.path});
+      // Windows에서 duration이 0으로 오는 경우 재시도
+      if (!duration || duration === 0) {
+        await new Promise(r => setTimeout(r, 500));
+        duration = await invoke('audio_get_duration').catch(() => 0);
+      }
       state.currentDuration=duration; state.currentPosition=0;
       if (!t.duration) { t.duration=duration; renderPlaylist(); }
       updateProgressUI(0,duration); setPlayState(true); startPositionTracking();
@@ -887,12 +907,43 @@
     if (!p) stopPositionTracking();
   }
 
-  document.getElementById('progress-wrap').addEventListener('click',async e=>{
-    if (!state.currentDuration) return;
-    const r=e.currentTarget.getBoundingClientRect();
-    const seconds=((e.clientX-r.left)/r.width)*state.currentDuration;
-    await invoke('audio_seek',{seconds}); state.currentPosition=seconds;
-    updateProgressUI(seconds,state.currentDuration);
+  // 진행 바 seek — 클릭 및 드래그 지원
+  const progressWrap = document.getElementById('progress-wrap');
+  let isSeeking = false;
+  let seekTargetSeconds = 0;
+
+  function calcSeekSeconds(e) {
+    if (!state.currentDuration) return null;
+    const r = progressWrap.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    return ratio * state.currentDuration;
+  }
+
+  progressWrap.addEventListener('mousedown', e => {
+    e.preventDefault();
+    isSeeking = true;
+    const s = calcSeekSeconds(e);
+    if (s === null) return;
+    seekTargetSeconds = s;
+    updateProgressUI(s, state.currentDuration);
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!isSeeking) return;
+    const s = calcSeekSeconds(e);
+    if (s === null) return;
+    seekTargetSeconds = s;
+    updateProgressUI(s, state.currentDuration);
+  });
+
+  document.addEventListener('mouseup', async e => {
+    if (!isSeeking) return;
+    const s = seekTargetSeconds;
+    state.currentPosition = s;
+    updateProgressUI(s, state.currentDuration);
+    try { await invoke('audio_seek', {seconds: s}); } catch(e) { console.error(e); }
+    isSeeking = false; // seek 완료 후에 플래그 해제
+    updateProgressUI(s, state.currentDuration);
   });
 
   const volSlider=document.getElementById('vol-slider');
@@ -1066,7 +1117,7 @@
       sel.addEventListener('change', async function() {
         const deviceName = this.value;
         try {
-          await invoke('audio_set_device', { device_name: deviceName });
+          await invoke('audio_set_device', { deviceName: deviceName });
         } catch(e) {
           console.error('장치 변경 실패:', e);
         }
@@ -1077,18 +1128,18 @@
   function formatTime(s){if(!s||isNaN(s))return'0:00';return`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;}
   function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
-  alert("APP LOADED"); drawVU(); buildEQSliders(); renderPlaylist(); requestAnimationFrame(animate);
+  drawVU(); buildEQSliders(); renderPlaylist(); requestAnimationFrame(animate);
   loadOutputDevices();
 
   // 장치 선택 이벤트 — loadOutputDevices 성공 여부와 무관하게 항상 등록
   document.getElementById('device-select').addEventListener('change', async function() {
     const deviceName = this.value;
-    alert('변경 시도: ' + deviceName);
+    console.log("변경 시도:", deviceName);
     try {
-      await invoke('audio_set_device', { device_name: deviceName });
-      alert('변경 성공');
+      await invoke('audio_set_device', { deviceName: deviceName });
+      console.log("변경 성공");
     } catch(e) {
-      alert('장치 변경 실패: ' + String(e));
+      console.error("장치 변경 실패:", e);
     }
   });
 })();

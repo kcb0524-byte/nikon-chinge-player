@@ -12,8 +12,10 @@
       {
         "title": "니콘 친게 뮤직 플레이어",
         "width": 1280,
-        "height": 900,
-        "resizable": false,
+        "height": 1060,
+        "minWidth": 960,
+        "minHeight": 920,
+        "resizable": true,
         "fullscreen": false,
         "dragDropEnabled": true
       }
@@ -28,7 +30,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
+    "targets": ["dmg", "nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

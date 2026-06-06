@@ -206,12 +206,15 @@
   }
 
   // ── 재생 위치 추적 ────────────────────────────
+  let isSeeking = false; // seek 중 positionTimer 업데이트 차단 플래그
+
   function startPositionTracking() {
     stopPositionTracking();
     state.positionTimer = setInterval(async () => {
-      if (!state.isPlaying) return;
+      if (!state.isPlaying || isSeeking) return;
       try {
         const pos = await invoke('audio_get_position');
+        if (isSeeking) return; // invoke 대기 중에 seek 시작됐으면 무시
         state.currentPosition = pos;
         updateProgressUI(pos, state.currentDuration);
         const finished = await invoke('audio_is_finished');
@@ -302,15 +305,80 @@
     if (!p) stopPositionTracking();
   }
 
-  // ── 진행바 ───────────────────────────────────
-  document.getElementById('progress-wrap').addEventListener('click', async e => {
-    if (!state.currentDuration) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    const seconds = ((e.clientX - r.left) / r.width) * state.currentDuration;
-    await invoke('audio_seek', { seconds });
-    state.currentPosition = seconds;
-    updateProgressUI(seconds, state.currentDuration);
-  });
+  // ── 진행바 (클릭 + 드래그 시크) ─────────────
+  (function() {
+    const wrap = document.getElementById('progress-wrap');
+    let seeking = false;
+
+    function calcSeconds(clientX) {
+      const r = wrap.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+      return ratio * state.currentDuration;
+    }
+
+    function beginSeek(clientX) {
+      if (!state.currentDuration) return;
+      seeking = true;
+      isSeeking = true;
+      const seconds = calcSeconds(clientX);
+      document.getElementById('progress-fill').style.transition = 'none';
+      updateProgressUI(seconds, state.currentDuration);
+      state.currentPosition = seconds;
+    }
+
+    function moveSeek(clientX) {
+      if (!seeking || !state.currentDuration) return;
+      const seconds = calcSeconds(clientX);
+      updateProgressUI(seconds, state.currentDuration);
+      state.currentPosition = seconds;
+    }
+
+    async function endSeek(clientX) {
+      if (!seeking) return;
+      seeking = false;
+      document.getElementById('progress-fill').style.transition = '';
+      if (!state.currentDuration) { isSeeking = false; return; }
+      const seconds = calcSeconds(clientX);
+      updateProgressUI(seconds, state.currentDuration);
+      state.currentPosition = seconds;
+      try {
+        await invoke('audio_seek', { seconds });
+      } catch(e) { console.error(e); }
+      isSeeking = false;
+    }
+
+    wrap.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      beginSeek(e.clientX);
+    });
+
+    document.addEventListener('mousemove', e => {
+      moveSeek(e.clientX);
+    });
+
+    document.addEventListener('mouseup', e => {
+      if (!seeking) return;
+      endSeek(e.clientX);
+    });
+
+    // 터치 지원
+    wrap.addEventListener('touchstart', e => {
+      e.preventDefault();
+      beginSeek(e.touches[0].clientX);
+    }, { passive: false });
+
+    document.addEventListener('touchmove', e => {
+      if (!seeking) return;
+      moveSeek(e.touches[0].clientX);
+    }, { passive: true });
+
+    document.addEventListener('touchend', e => {
+      if (!seeking) return;
+      const touch = e.changedTouches[0];
+      endSeek(touch.clientX);
+    });
+  })();
 
   // ── 볼륨 슬라이더 ────────────────────────────
   // 슬라이더 0~100 → Rust에서 dB 변환 (심리음향학적 로그 스케일)
@@ -356,15 +424,29 @@
 
   async function addFilesToPlaylist(fps) {
     const was = state.playlist.length === 0;
+    const newTracks = [];
     for (const fp of fps) {
       if (state.playlist.some(t => t.path === fp)) continue;
       const parts = fp.replace(/\\/g, '/').split('/');
       const bn = parts[parts.length - 1];
       const ext = bn.split('.').pop().toLowerCase();
-      state.playlist.push({ path: fp, name: bn.replace(/\.[^.]+$/, ''), ext, duration: null });
+      const track = { path: fp, name: bn.replace(/\.[^.]+$/, ''), ext, duration: null };
+      state.playlist.push(track);
+      newTracks.push(track);
     }
     renderPlaylist();
     if (was && state.playlist.length) loadAndPlay(0);
+    // duration을 백그라운드에서 순차적으로 로드 (UI를 블로킹하지 않음)
+    for (const track of newTracks) {
+      if (track.duration !== null) continue;
+      try {
+        const dur = await invoke('audio_get_file_duration', { path: track.path });
+        if (dur > 0) {
+          track.duration = dur;
+          renderPlaylist();
+        }
+      } catch(e) { /* duration 로드 실패 시 '--:--' 유지 */ }
+    }
   }
 
   // ── Public API ───────────────────────────────

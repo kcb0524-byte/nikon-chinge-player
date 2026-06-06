@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>니콘 친게 뮤직 플레이어</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700&family=Courier+Prime:wght@400;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cormorant+Garamond:wght@400;600;700&family=Playfair+Display:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700&family=Courier+Prime:wght@400;700&display=swap');
 
   :root {
     --bg-primary: #1a1208;
@@ -86,9 +86,12 @@
   .titlebar::before { left: 90px; }
   .titlebar::after { right: 90px; background: linear-gradient(90deg, var(--accent), transparent); }
   .titlebar-logo {
-    font-family: 'Playfair Display', serif;
-    font-size: 15px; font-weight: 700; letter-spacing: 4px;
+    font-family: 'Cinzel', serif;
+    font-size: 14px; font-weight: 600; letter-spacing: 6px;
     color: var(--accent2); text-transform: uppercase;
+    background: linear-gradient(90deg, var(--accent) 0%, var(--accent2) 50%, var(--accent) 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
 
   .main-content { display: flex; flex: 1; overflow: hidden; }
@@ -106,20 +109,39 @@
     display: flex; flex-direction: column; align-items: center; gap: 8px;
     position: relative;
     box-shadow: inset 0 1px 0 rgba(200,160,80,0.1), 0 4px 20px rgba(0,0,0,0.4);
+    pointer-events: none;
   }
+  .lp-section button,
+  .lp-section input[type="range"],
+  .lp-section select,
+  .lp-section .slider-wrap { pointer-events: auto; }
   .lp-section::before {
     content: ''; position: absolute; inset: 0; border-radius: 12px;
     background: radial-gradient(ellipse at 50% 0%, rgba(200,160,80,0.06) 0%, transparent 70%);
     pointer-events: none;
   }
 
-  #lp-canvas { display: block; }
+  #lp-canvas { display: block; pointer-events: none; }
+  .lp-container { pointer-events: none; }
 
   .track-info { text-align: center; width: 100%; padding: 0 8px; }
   .track-title {
-    font-family: 'Playfair Display', serif;
-    font-size: 15px; font-weight: 700; color: var(--text);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 3px;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 17px; font-weight: 600; color: var(--text);
+    white-space: nowrap; overflow: hidden; margin-bottom: 3px;
+    width: 100%;
+  }
+  .track-title-inner {
+    display: inline-block;
+    white-space: nowrap;
+    padding-right: 40px;
+  }
+  .track-title-inner.scrolling {
+    animation: marquee-scroll linear infinite;
+  }
+  @keyframes marquee-scroll {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
   }
   .track-artist { font-size: 11px; color: var(--text-muted); letter-spacing: 1px; margin-bottom: 5px; }
   .track-file-info {
@@ -147,26 +169,9 @@
   }
 
   .progress-section { width: 100%; display: flex; flex-direction: column; gap: 4px; }
-  .progress-bar-wrap {
-    position: relative; height: 16px; background: transparent;
-    border-radius: 2px; cursor: pointer; overflow: visible;
-    display: flex; align-items: center;
+  #progress-fill {
+    background: linear-gradient(90deg, var(--wood), var(--accent), var(--accent2));
   }
-  .progress-bar-track {
-    position: absolute; left: 0; right: 0; height: 4px;
-    background: var(--bg-card2); border-radius: 2px; overflow: hidden;
-  }
-  .progress-bar-fill {
-    height: 100%; background: linear-gradient(90deg, var(--wood), var(--accent), var(--accent2));
-    border-radius: 2px; width: 0%; transition: width 0.05s linear;
-    position: relative;
-  }
-  .progress-bar-fill::after {
-    content: ''; position: absolute; right: -5px; top: 50%; transform: translateY(-50%);
-    width: 10px; height: 10px; background: var(--accent2); border-radius: 50%;
-    box-shadow: 0 0 8px var(--glow); opacity: 0; transition: opacity 0.2s;
-  }
-  .progress-bar-wrap:hover .progress-bar-fill::after { opacity: 1; }
   .progress-times {
     display: flex; justify-content: space-between;
     font-size: 11px; color: var(--text-muted);
@@ -211,6 +216,12 @@
   input[type="range"] {
     position: absolute; inset: -8px 0; width: 100%;
     height: calc(100% + 16px); opacity: 0; cursor: pointer; margin: 0;
+    z-index: 100; pointer-events: auto !important; -webkit-appearance: none;
+  }
+  #progress-range {
+    pointer-events: auto !important;
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: pointer; margin: 0; z-index: 200;
   }
   .volume-val {
     font-size: 11px; color: var(--text-muted);
@@ -309,7 +320,7 @@
   .eq-action-btn:hover { border-color: var(--green); color: var(--green2); background: var(--green-dim); }
 
   /* 오른쪽 패널 */
-  .right-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .right-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 
   .playlist-header {
     display: flex; align-items: center; justify-content: space-between;
@@ -345,7 +356,7 @@
   }
   .playlist-empty-hint { font-size: 12px; color: var(--text-muted); opacity: 0.6; text-align: center; }
 
-  .playlist-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+  .playlist-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; }
   .playlist-list::-webkit-scrollbar { width: 4px; }
   .playlist-list::-webkit-scrollbar-track { background: transparent; }
   .playlist-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
@@ -391,7 +402,7 @@
   .pl-remove:hover { color: var(--red); }
 
   .spectrum-section { padding: 0 16px 8px; flex-shrink: 0; }
-  #spectrum-canvas { width: 100%; height: 60px; display: block; }
+  #spectrum-canvas { width: 100%; height: 120px; display: block; }
 
   .device-section {
     display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px;
@@ -465,27 +476,23 @@
 
       <div class="lp-section">
         <div class="lp-container">
-          <canvas id="lp-canvas" width="260" height="180" style="width:260px;height:180px;display:block;flex-shrink:0;"></canvas>
+          <canvas id="lp-canvas" width="320" height="220" style="width:320px;height:220px;display:block;flex-shrink:0;"></canvas>
         </div>
 
         <div class="track-info">
-          <div class="track-title" id="track-title">─</div>
+          <div class="track-title" id="track-title"><span class="track-title-inner" id="track-title-inner">─</span></div>
           <div class="track-artist" id="track-artist"></div>
           <div class="track-file-info" id="track-file-info"></div>
         </div>
 
-        <div class="progress-section">
-          <div class="progress-bar-wrap" id="progress-wrap">
-            <div class="progress-bar-track">
-              <div class="progress-bar-fill" id="progress-fill"></div>
-            </div>
-          </div>
-          <div class="progress-times">
-            <span id="time-current">0:00</span>
-            <span id="time-total">0:00</span>
-          </div>
+        <div class="slider-wrap" id="progress-wrap" style="width:100%">
+          <div class="slider-fill" id="progress-fill"></div>
+          <input type="range" id="progress-range" min="0" max="1000" value="0" step="1">
         </div>
-
+        <div class="progress-times" style="display:flex;justify-content:space-between;width:100%;font-size:11px;color:var(--text-muted);font-family:'Courier Prime',monospace;">
+          <span id="time-current">0:00</span>
+          <span id="time-total">0:00</span>
+        </div>
         <div class="controls">
           <button class="ctrl-btn" id="btn-shuffle" title="랜덤 재생" onclick="window.playerAPI.toggleShuffle()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
@@ -504,8 +511,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
           </button>
         </div>
+      </div>
 
-        <div class="volume-section">
+
+      <div class="volume-section">
           <div class="volume-icon">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
           </div>
@@ -524,7 +533,6 @@
             <option value="">기본 장치</option>
           </select>
         </div>
-      </div>
 
       <div class="vu-meter-section">
         <div class="vu-meter-label">VU Meter</div>
@@ -579,7 +587,7 @@
       </div>
 
       <div class="spectrum-section">
-        <canvas id="spectrum-canvas" height="60"></canvas>
+        <canvas id="spectrum-canvas" height="120"></canvas>
       </div>
 
       <div id="playlist-empty" class="playlist-empty">
@@ -610,7 +618,6 @@
   'use strict';
 
   const { open } = window.__TAURI__.dialog;
-  const { readDir } = window.__TAURI__.fs;
   const { invoke } = window.__TAURI__.core;
 
   const SUPPORTED_EXTS = new Set(['mp3','flac','wav','aac','m4a','ogg','opus','wma',
@@ -622,8 +629,11 @@
     isShuffle: false, repeatMode: 0, volume: 80,
     eqEnabled: false, animFrame: null, positionTimer: null,
     currentPosition: 0, currentDuration: 0,
+    armLanding: false,  // 톤암 착지 애니메이션 진행 중 플래그
     customEQPresets: JSON.parse(localStorage.getItem('customEQPresets') || '{}')
   };
+  let isSeeking = false; // 진행바 드래그 중 positionTimer 업데이트 차단
+  const progressRange = document.getElementById('progress-range');
 
   const EQ_BANDS = [
     {freq:32,label:'32'},{freq:64,label:'64'},{freq:125,label:'125'},
@@ -646,7 +656,10 @@
   const lpCanvas = document.getElementById('lp-canvas');
   const lpCtx = lpCanvas.getContext('2d');
   let lpSpinAngle=0, lpColorHue=30;
-  const ARM_ANGLE_REST=95, ARM_ANGLE_START=140, ARM_ANGLE_END=162, ARM_LEN=130;
+  // REST: 재생 안 할 때 LP 바깥 우측 (들어올린 위치)
+  // START: 재생 시작 - LP 바깥 가장자리 (dist≈100)
+  // END: 재생 끝 - 레이블 직전 (dist≈50), 실제 LP처럼 너무 안까지 안 들어감
+  const ARM_ANGLE_REST=115, ARM_ANGLE_START=128, ARM_ANGLE_END=148, ARM_LEN=185;
   let armAngle=ARM_ANGLE_REST, armAngleTarget=ARM_ANGLE_REST, armInitialized=false;
 
   function drawLP() {
@@ -709,22 +722,100 @@
   window.addEventListener('resize',resizeSpec); resizeSpec();
   let spectrumData = new Float32Array(80).fill(0);
 
+  // 무지개 색상: 저음=빨강(0°) → 주황 → 노랑 → 초록 → 파랑 → 보라(270°)
+  function specHue(t){ return Math.round(t * 270); }
+
+  // 피크 도트 상태 (각 밴드별 피크 y위치 + 홀드 타이머)
+  const SPEC_BC = 80;
+  let specPeaks = new Float32Array(SPEC_BC).fill(0);
+  let specPeakHold = new Float32Array(SPEC_BC).fill(0);
+  let specParticles = Array.from({length: SPEC_BC}, () => []);
+  const TAIL_LEN = 28;
+  // 마지막으로 입자를 생성한 프레임 카운터 (너무 잦은 생성 방지)
+  let specParticleFrame = new Int32Array(SPEC_BC).fill(0);
+  let specFrameCount = 0;
+
   function drawSpectrum(){
     const w=specCanvas.offsetWidth, h=specCanvas.offsetHeight;
     specCtx.clearRect(0,0,w,h);
     if(!state.isPlaying){
-      specCtx.beginPath();specCtx.moveTo(0,h);specCtx.lineTo(w,h);
-      specCtx.strokeStyle='rgba(180,130,60,0.2)';specCtx.lineWidth=1;specCtx.stroke();return;
+      specCtx.beginPath();specCtx.moveTo(0,h-1);specCtx.lineTo(w,h-1);
+      specCtx.strokeStyle='rgba(180,130,60,0.15)';specCtx.lineWidth=1;specCtx.stroke();
+      return;
     }
-    const bc=spectrumData.length, bw=(w/bc)-1;
+    specFrameCount++;
+    const bc=SPEC_BC;
+    const slot=w/bc;
+    const dw=Math.max(2, slot*0.6);
+    const dh=2;
+    const dx=(slot-dw)/2;
+    const topMargin=6, botMargin=4;
+    const range=h-topMargin-botMargin;
+
     for(let i=0;i<bc;i++){
-      const val=spectrumData[i]||0, bh=val*h*0.95;
-      const t=i/bc;
-      const r=Math.round(0*(1-t)+82*t), g2=Math.round(180*(1-t)+183*t), b=Math.round(216*(1-t)+136*t);
-      const g=specCtx.createLinearGradient(0,h-bh,0,h);
-      g.addColorStop(0,`rgba(${r},${g2},${b},0.95)`);
-      g.addColorStop(1,`rgba(${r},${g2},${b},0.15)`);
-      specCtx.fillStyle=g; specCtx.fillRect(i*(bw+1),h-bh,bw,bh);
+      const raw=spectrumData[i]||0;
+      const val = Math.pow(Math.min(raw, 1.0), 0.6);
+      const t=i/(bc-1);
+      const hue=specHue(t);
+      const x=i*slot+dx;
+
+      // ── 피크 갱신 + 입자 생성
+      // 신호가 현재 피크보다 높으면: 기존 피크를 입자로 분리하고 새 피크 세팅
+      if(val > specPeaks[i] && val > 0.04){
+        if(specPeaks[i] > 0.04){
+          // 기존 피크 → 낙하 입자로 분리 (최대 3개, 16프레임 간격)
+          if(specParticles[i].length < 2 && specFrameCount - specParticleFrame[i] >= 32){
+            specParticles[i].push({ val: specPeaks[i], tail: [] });
+            specParticleFrame[i] = specFrameCount;
+          }
+        }
+        specPeaks[i] = val;
+        specPeakHold[i] = 25;
+      } else if(specPeakHold[i] > 0){
+        specPeakHold[i]--;
+        if(specPeakHold[i] === 0){
+          // 홀드 끝 → 입자로 분리
+          if(specPeaks[i] > 0.04 && specParticles[i].length < 2){
+            specParticles[i].push({ val: specPeaks[i], tail: [] });
+            specParticleFrame[i] = specFrameCount;
+          }
+          specPeaks[i] = 0;
+        }
+      }
+
+      // ── 독립 낙하 입자들 업데이트 & 그리기
+      specParticles[i] = specParticles[i].filter(p => {
+        p.tail.unshift(p.val);
+        if(p.tail.length > TAIL_LEN) p.tail.pop();
+        p.val = Math.max(0, p.val - 0.006);
+
+        // 꼬리 (위쪽, 제곱 감쇠)
+        for(let s=0; s<p.tail.length; s++){
+          const tailY = topMargin + (1 - p.tail[s]) * range;
+          const ratio = 1 - s / TAIL_LEN;
+          const tailAlpha = ratio * ratio * 0.28;
+          if(tailAlpha < 0.015) continue;
+          specCtx.fillStyle = `hsla(${hue},80%,62%,${tailAlpha})`;
+          specCtx.fillRect(x, tailY, dw, dh);
+        }
+
+        // 메인 도트
+        if(p.val > 0.003){
+          const pY = topMargin + (1 - p.val) * range;
+          const alpha = Math.min(0.95, p.val * 3 + 0.15);
+          specCtx.fillStyle = `hsla(${hue},100%,85%,${alpha})`;
+          specCtx.fillRect(x, pY, dw, dh);
+          return true;
+        }
+        return false;
+      });
+
+      // ── 홀드 중 피크 도트 (꼬리 없음, 밝게)
+      if(specPeakHold[i] > 0 && specPeaks[i] > 0.04){
+        const peakY = topMargin + (1 - specPeaks[i]) * range;
+        specCtx.fillStyle = `hsla(${hue},100%,88%,0.95)`;
+        specCtx.fillRect(x, peakY, dw, dh);
+      }
     }
   }
 
@@ -774,21 +865,36 @@
     if (!state.isPlaying) return;
     try {
       const [spectrum, rms] = await Promise.all([invoke('audio_get_spectrum'), invoke('audio_get_rms')]);
-      spectrumData = spectrum; rmsL = Math.min(rms[0]*5,1); rmsR = Math.min(rms[1]*5,1);
+      spectrumData = spectrum; rmsL = Math.min(rms[0]*2.5,1); rmsR = Math.min(rms[1]*2.5,1);
     } catch(e) {}
   }
 
   function animate(ts) {
     state.animFrame = requestAnimationFrame(animate);
     if (state.isPlaying) { lpSpinAngle += 0.012; lpColorHue = (lpColorHue+0.05)%360; }
-    if (!state.isPlaying) { armAngleTarget=ARM_ANGLE_REST; armInitialized=false; }
-    else if (state.currentDuration>0) {
-      const p=state.currentPosition/state.currentDuration;
-      armAngleTarget=ARM_ANGLE_START+(ARM_ANGLE_END-ARM_ANGLE_START)*p;
-      if (!armInitialized) { armAngle=armAngleTarget; armInitialized=true; }
-    } else armAngleTarget=ARM_ANGLE_START;
-    const diff=armAngleTarget-armAngle;
-    armAngle += state.isPlaying ? diff : diff*0.05;
+    if (state.armLanding) {
+      // 착지 애니메이션 중: REST → START 로 천천히 이동
+      armAngleTarget = ARM_ANGLE_START;
+    } else if (!state.isPlaying) {
+      armAngleTarget = ARM_ANGLE_REST;
+      armInitialized = false;
+    } else if (state.currentDuration > 0) {
+      const p = Math.min(state.currentPosition / state.currentDuration, 1.0);
+      armAngleTarget = ARM_ANGLE_START + (ARM_ANGLE_END - ARM_ANGLE_START) * p;
+      if (!armInitialized) { armAngle = armAngleTarget; armInitialized = true; }
+    } else {
+      armAngleTarget = ARM_ANGLE_START;
+    }
+    armAngleTarget = Math.min(armAngleTarget, ARM_ANGLE_END);
+    armAngle = Math.min(armAngle, ARM_ANGLE_END);
+    const diff = armAngleTarget - armAngle;
+    // 착지 중: 선형 이동 (1초 = 60프레임, 13도 / 60 ≈ 0.22도/프레임)
+    // 재생 중: 지수 감쇠(빠르게 자리잡기), REST 복귀: 중간 속도
+    if (state.armLanding) {
+      armAngle += Math.sign(diff) * Math.min(Math.abs(diff), 0.20); // 선형, 최대 0.20도/프레임
+    } else {
+      armAngle += state.isPlaying ? diff*0.08 : diff*0.05;
+    }
     drawLP(); drawSpectrum();
     updateVU(vuNeedleL, state.isPlaying?rmsL:0);
     updateVU(vuNeedleR, state.isPlaying?rmsR:0);
@@ -799,9 +905,10 @@
   function startPositionTracking() {
     stopPositionTracking();
     state.positionTimer = setInterval(async () => {
-      if (!state.isPlaying) return;
+      if (!state.isPlaying || isSeeking) return;
       try {
         const pos = await invoke('audio_get_position');
+        if (isSeeking) return;
         state.currentPosition = pos;
         // duration이 0이면 재시도 (Windows MP3 등)
         if (!state.currentDuration || state.currentDuration === 0) {
@@ -815,7 +922,11 @@
   }
   function stopPositionTracking() { if (state.positionTimer) { clearInterval(state.positionTimer); state.positionTimer=null; } }
   function updateProgressUI(pos,dur) {
-    if (dur>0) document.getElementById('progress-fill').style.width=(pos/dur*100)+'%';
+    if (dur>0) {
+      const pct = pos/dur*100;
+      document.getElementById('progress-fill').style.width=pct+'%';
+      if (!isSeeking) progressRange.value=Math.round(pct*10);
+    }
     document.getElementById('time-current').textContent=formatTime(pos);
     document.getElementById('time-total').textContent=formatTime(dur);
   }
@@ -856,6 +967,30 @@
     });
   }
 
+  // 곡명 표시: 길면 마퀴 스크롤, 짧으면 중앙 정렬
+  function setTrackTitle(text) {
+    const container = document.getElementById('track-title');
+    const inner = document.getElementById('track-title-inner');
+    if (!container || !inner) return;
+    inner.classList.remove('scrolling');
+    inner.style.animation = '';
+    inner.textContent = text;
+    // 다음 프레임에서 width 계산 후 마퀴 적용
+    requestAnimationFrame(() => {
+      const cw = container.offsetWidth;
+      const iw = inner.scrollWidth;
+      if (iw > cw + 4) {
+        // 텍스트를 두 번 반복해서 끊김 없이 루프
+        inner.textContent = text + '   ' + text;
+        const duration = Math.max(6, (iw / 40)).toFixed(1);
+        inner.style.animationDuration = duration + 's';
+        inner.classList.add('scrolling');
+      } else {
+        inner.textContent = text;
+      }
+    });
+  }
+
   async function loadAndPlay(index) {
     if (index<0||index>=state.playlist.length) return;
     state.currentIndex=index;
@@ -863,11 +998,11 @@
     document.querySelectorAll('.pl-item').forEach((el,i)=>el.classList.toggle('active',i===index));
     const items=document.querySelectorAll('.pl-item');
     if (items[index]) items[index].scrollIntoView({block:'nearest',behavior:'smooth'});
-    const nameNoExt=t.name.replace(/\.[^.]+$/,'');
-    const dashIdx=nameNoExt.indexOf(' - ');
-    let trackTitle=nameNoExt, trackArtist='';
-    if (dashIdx>0) { trackArtist=nameNoExt.slice(0,dashIdx).trim(); trackTitle=nameNoExt.slice(dashIdx+3).trim(); }
-    document.getElementById('track-title').textContent=trackTitle;
+    // t.name은 이미 확장자 없는 파일명 — 다시 자르지 않음
+    const dashIdx=t.name.indexOf(' - ');
+    let trackTitle=t.name, trackArtist='';
+    if (dashIdx>0) { trackArtist=t.name.slice(0,dashIdx).trim(); trackTitle=t.name.slice(dashIdx+3).trim(); }
+    setTrackTitle(trackTitle);
     document.getElementById('track-artist').textContent=trackArtist;
     document.getElementById('track-file-info').innerHTML='';
     invoke('audio_get_file_info',{path:t.path}).then(info=>{
@@ -885,6 +1020,19 @@
       if (!isLossless&&info.bitrate_kbps>0) badges.push(`<span class="track-badge lossy">${info.bitrate_kbps}kbps</span>`);
       el.innerHTML=badges.join('');
     }).catch(()=>{});
+    // 현재 재생 중이면 멈추고 톤암을 REST 위치로 즉시 리셋
+    if (state.isPlaying) {
+      await invoke('audio_stop').catch(()=>{});
+      setPlayState(false);
+    }
+    armAngle = ARM_ANGLE_REST;      // 톤암 강제 REST 위치로
+    armAngleTarget = ARM_ANGLE_REST;
+    armInitialized = false;
+
+    // 톤암 착지 애니메이션: REST(115°) → START(128°)로 천천히 이동
+    state.armLanding = true;
+    await new Promise(r => setTimeout(r, 1000)); // 1초 대기 (애니메이션 감상)
+    state.armLanding = false;
     try {
       let duration=await invoke('audio_play',{path:t.path});
       // Windows에서 duration이 0으로 오는 경우 재시도
@@ -902,31 +1050,40 @@
     state.isPlaying=p;
     document.getElementById('play-icon').style.display=p?'none':'';
     document.getElementById('pause-icon').style.display=p?'':'none';
-    if (!p) stopPositionTracking();
+    if (!p) {
+      stopPositionTracking();
+      // 정지 시 피크/입자 리셋
+      specPeaks.fill(0);
+      specPeakHold.fill(0);
+      specParticles = Array.from({length: SPEC_BC}, () => []);
+      specParticleFrame.fill(0);
+      specFrameCount = 0;
+    }
   }
 
-  // 진행 바 seek — 클릭 및 드래그 지원
-  const progressWrap = document.getElementById('progress-wrap');
-  let isSeeking = false;
+  // 진행바 seek — input[type=range] 방식 (볼륨 슬라이더와 동일)
+  progressRange.addEventListener('mousedown', () => { isSeeking = true; });
+  progressRange.addEventListener('touchstart', () => { isSeeking = true; }, {passive:true});
 
-  function doSeek(e) {
+  progressRange.addEventListener('input', () => {
     if (!state.currentDuration) return;
-    const r = progressWrap.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-    const seconds = ratio * state.currentDuration;
-    invoke('audio_seek', {seconds}).catch(console.error);
+    const pct = progressRange.value / 1000;
+    const seconds = pct * state.currentDuration;
+    document.getElementById('progress-fill').style.width = (pct * 100) + '%';
+    document.getElementById('time-current').textContent = formatTime(seconds);
     state.currentPosition = seconds;
-    updateProgressUI(seconds, state.currentDuration);
-  }
+  });
 
-  progressWrap.addEventListener('mousedown', e => {
-    isSeeking = true;
-    doSeek(e);
+  progressRange.addEventListener('change', async () => {
+    if (!state.currentDuration) return;
+    const pct = progressRange.value / 1000;
+    const seconds = pct * state.currentDuration;
+    document.getElementById('progress-fill').style.width = (pct * 100) + '%';
+    document.getElementById('time-current').textContent = formatTime(seconds);
+    state.currentPosition = seconds;
+    try { await invoke('audio_seek', {seconds}); } catch(e) { console.error(e); }
+    isSeeking = false;
   });
-  document.addEventListener('mousemove', e => {
-    if (isSeeking) doSeek(e);
-  });
-  document.addEventListener('mouseup', () => { isSeeking = false; });
 
   const volSlider=document.getElementById('vol-slider');
   volSlider.addEventListener('input',()=>{
@@ -936,42 +1093,139 @@
     invoke('audio_set_volume',{volume:v}).catch(console.error);
   });
 
-  const dropOverlay=document.getElementById('drop-overlay');
-  document.addEventListener('dragover',e=>{e.preventDefault();dropOverlay&&dropOverlay.classList.add('active');});
-  document.addEventListener('dragleave',e=>{if(!e.relatedTarget||e.relatedTarget===document.documentElement)dropOverlay&&dropOverlay.classList.remove('active');});
-  document.addEventListener('drop',async e=>{
-    e.preventDefault(); dropOverlay&&dropOverlay.classList.remove('active');
-    const paths=[];
-    for (const f of Array.from(e.dataTransfer.files)) {
-      if (!f.path) continue;
-      const ext=f.name.split('.').pop().toLowerCase();
-      if (SUPPORTED_EXTS.has(ext)) paths.push(f.path);
-      else { const found=await scanFolder(f.path); paths.push(...found); }
-    }
-    if (paths.length) addFilesToPlaylist(paths);
-  });
 
-  async function scanFolder(dir) {
-    const res=[];
-    try {
-      const entries=await readDir(dir,{recursive:true});
-      function collect(items){for(const it of items){if(it.children)collect(it.children);else if(it.name){const ext=it.name.split('.').pop().toLowerCase();if(SUPPORTED_EXTS.has(ext))res.push(it.path);}}}
-      collect(entries);
-    } catch(e) { console.error(e); }
-    return res;
+  const dropOverlay=document.getElementById('drop-overlay');
+  // dragDropEnabled:true → Tauri 이벤트만 사용 (브라우저 drop 비활성화)
+  document.addEventListener('dragover', e => { e.preventDefault(); });
+  document.addEventListener('drop', e => { e.preventDefault(); }); // 브라우저 기본동작 막기
+
+  // Tauri drag-drop 이벤트 (폴더/파일 모두 경로 정확히 옴)
+  let _tauriDropHandled = false;
+  if (window.__TAURI__) {
+    const { listen } = window.__TAURI__.event;
+    listen('tauri://drag-enter', () => {
+      dropOverlay&&dropOverlay.classList.add('active');
+    });
+    listen('tauri://drag-leave', () => {
+      dropOverlay&&dropOverlay.classList.remove('active');
+    });
+    listen('tauri://drag-drop', async ev => {
+      dropOverlay&&dropOverlay.classList.remove('active');
+      // 중복 방지: 동일 이벤트 100ms 내 재호출 무시
+      if (_tauriDropHandled) return;
+      _tauriDropHandled = true;
+      setTimeout(() => { _tauriDropHandled = false; }, 100);
+
+      const droppedPaths = ev.payload?.paths || ev.payload?.files || [];
+      const paths = [];
+      for (const p of droppedPaths) {
+        const found = await scanFolder(p);
+        paths.push(...found);
+      }
+      if (paths.length) addFilesToPlaylist(paths);
+      else alert('지원하는 음악 파일이 없습니다.');
+    });
   }
 
-  async function addFilesToPlaylist(fps) {
-    const was=state.playlist.length===0;
-    for (const fp of fps) {
-      if (state.playlist.some(t=>t.path===fp)) continue;
-      const parts=fp.replace(/\\/g,'/').split('/');
-      const bn=parts[parts.length-1];
-      const ext=bn.split('.').pop().toLowerCase();
-      state.playlist.push({path:fp,name:bn.replace(/\.[^.]+$/,''),ext,duration:null});
+  async function scanFolder(dir) {
+    try {
+      return await invoke('scan_folder', {path: dir});
+    } catch(e) { console.error(e); return []; }
+  }
+
+  // 경로 정규화: 슬래시 통일, 중복 슬래시 제거, 디코딩, macOS /private 접두어 제거
+  function normPath(p) {
+    try { p = decodeURIComponent(p); } catch(e) {}
+    p = p.replace(/\\/g,'/').replace(/\/+/g,'/').replace(/\/$/,'');
+    // macOS: /private/var/folders/... 와 /var/folders/... 동일 처리
+    if (p.startsWith('/private/')) p = p.slice(8); // '/private' 제거
+    return p;
+  }
+
+  // 파일명 정규화: ._01. Track → 01 track, 숫자+점 접두어·특수문자 제거
+  function normName(name) {
+    return name
+      .toLowerCase()
+      .replace(/^[\._\s]+/, '')           // 앞의 ._  제거
+      .replace(/^\d+[\.\-\s]+/, '')       // 앞의 숫자+구분자 제거 (01. / 01- / 01 )
+      .replace(/\s*\(.*?\)\s*/g, '')      // (2022 Remaster) 등 괄호 제거
+      .replace(/[^a-z0-9가-힣]/g, '')     // 특수문자 제거
+      .trim();
+  }
+
+  // duration 로드 후 중복 제거:
+  // 정규화된 파일명이 같으면 duration 있는 것만 남김
+  function dedupePlaylist() {
+    const seen = new Map(); // normName → best track
+    for (const t of state.playlist) {
+      const key = normName(t.name);
+      if (!key) continue; // 빈 키는 건너뜀
+      if (!seen.has(key)) {
+        seen.set(key, t);
+      } else {
+        const prev = seen.get(key);
+        // duration 있는 쪽 우선, 둘 다 있으면 더 긴 쪽
+        if (!prev.duration && t.duration) seen.set(key, t);
+        else if (prev.duration && t.duration && t.duration > prev.duration) seen.set(key, t);
+      }
     }
-    renderPlaylist();
-    if (was&&state.playlist.length) loadAndPlay(0);
+    const before = state.playlist.length;
+    // 현재 재생 중인 트랙 객체 기억
+    const currentTrack = state.currentIndex >= 0 ? state.playlist[state.currentIndex] : null;
+    state.playlist = Array.from(seen.values());
+    // currentIndex를 현재 트랙 기준으로 재조정
+    if (currentTrack) {
+      const newIdx = state.playlist.indexOf(currentTrack);
+      state.currentIndex = newIdx >= 0 ? newIdx : -1;
+    } else {
+      if (state.currentIndex >= state.playlist.length) state.currentIndex = -1;
+    }
+    const removed = before - state.playlist.length;
+    if (removed > 0) console.log(`중복 ${removed}곡 자동 제거`);
+  }
+
+  // 큐 기반 직렬 처리 — 동시에 여러 번 호출돼도 순서대로 실행
+  let _plQueue = Promise.resolve();
+  async function addFilesToPlaylist(fps) {
+    _plQueue = _plQueue.then(async () => {
+      const was = state.playlist.length === 0;
+      const existingNorm = new Set(state.playlist.map(t => normPath(t.path)));
+      const newTracks = [];
+      for (const fp of fps) {
+        const n = normPath(fp);
+        if (existingNorm.has(n)) continue;
+        const parts = fp.replace(/\\/g,'/').split('/');
+        const bn = parts[parts.length-1];
+        const ext = bn.split('.').pop().toLowerCase();
+        const name = bn.replace(new RegExp('\\.'+ext+'$','i'), '');
+        const t = {path:fp, name, ext, duration:null};
+        state.playlist.push(t);
+        existingNorm.add(n);
+        newTracks.push(t);
+      }
+      if (newTracks.length) {
+        const BATCH = 8;
+        for (let i = 0; i < newTracks.length; i += BATCH) {
+          const batch = newTracks.slice(i, i+BATCH);
+          await Promise.all(batch.map(t =>
+            invoke('audio_get_file_duration', {path: t.path})
+              .then(d => { if(d>0) t.duration=d; }).catch(()=>{})
+          ));
+        }
+      }
+      // duration 로드 완료 후 중복 자동 제거
+      // 재생 중인 경우: dedup 전에 현재 트랙 경로 기억
+      const playingPath = state.currentIndex >= 0 ? state.playlist[state.currentIndex]?.path : null;
+      dedupePlaylist();
+      // dedup 후 currentIndex가 -1이 됐지만 재생 중이던 트랙이 있으면 인덱스 복구
+      if (playingPath && state.currentIndex === -1) {
+        const recovered = state.playlist.findIndex(t => normPath(t.path) === normPath(playingPath));
+        if (recovered >= 0) state.currentIndex = recovered;
+      }
+      renderPlaylist();
+      if (was && state.playlist.length) loadAndPlay(0);
+    });
+    return _plQueue;
   }
 
   window.playerAPI = {
@@ -980,8 +1234,18 @@
       if (sel) addFilesToPlaylist(Array.isArray(sel)?sel:[sel]);
     },
     async openFolder() {
-      const sel=await open({directory:true});
-      if (sel) { const f=await scanFolder(sel); if(f.length) addFilesToPlaylist(f); }
+      try {
+        const sel=await open({directory:true, multiple:false});
+        if (!sel) return;
+        const dirs=Array.isArray(sel)?sel:[sel];
+        const paths=[];
+        for (const d of dirs) {
+          const found=await invoke('scan_folder',{path:d});
+          paths.push(...found);
+        }
+        if (paths.length) addFilesToPlaylist(paths);
+        else alert('지원하는 음악 파일이 없습니다.');
+      } catch(e) { console.error('폴더 추가 오류:', e); }
     },
     async togglePlay() {
       if (!state.playlist.length) return;
@@ -1003,7 +1267,7 @@
       if (state.currentIndex===i) {
         invoke('audio_stop'); setPlayState(false);
         state.currentIndex=-1; state.currentPosition=0; state.currentDuration=0;
-        document.getElementById('track-title').textContent='음악을 추가하세요';
+        setTrackTitle('음악을 추가하세요');
         document.getElementById('track-artist').textContent='';
         document.getElementById('track-file-info').innerHTML='';
         document.getElementById('progress-fill').style.width='0%';
@@ -1013,7 +1277,7 @@
     clearPlaylist() {
       invoke('audio_stop'); setPlayState(false);
       state.playlist=[]; state.currentIndex=-1; state.currentPosition=0; state.currentDuration=0;
-      document.getElementById('track-title').textContent='음악을 추가하세요';
+      setTrackTitle('음악을 추가하세요');
       document.getElementById('track-artist').textContent='';
       document.getElementById('progress-fill').style.width='0%';
       document.getElementById('time-current').textContent='0:00';
@@ -1070,10 +1334,10 @@
   document.addEventListener('keydown',e=>{
     if(e.target.tagName==='INPUT') return;
     if(e.code==='Space'){e.preventDefault();window.playerAPI.togglePlay();}
-    else if(e.code==='ArrowRight') window.playerAPI.nextTrack();
-    else if(e.code==='ArrowLeft') window.playerAPI.prevTrack();
-    else if(e.code==='ArrowUp'){e.preventDefault();volSlider.value=Math.min(100,+volSlider.value+5);volSlider.dispatchEvent(new Event('input'));}
-    else if(e.code==='ArrowDown'){e.preventDefault();volSlider.value=Math.max(0,+volSlider.value-5);volSlider.dispatchEvent(new Event('input'));}
+    else if(e.code==='ArrowRight'){e.preventDefault();volSlider.value=Math.min(100,+volSlider.value+5);volSlider.dispatchEvent(new Event('input'));}
+    else if(e.code==='ArrowLeft'){e.preventDefault();volSlider.value=Math.max(0,+volSlider.value-5);volSlider.dispatchEvent(new Event('input'));}
+    else if(e.code==='ArrowUp'){e.preventDefault();window.playerAPI.prevTrack();}
+    else if(e.code==='ArrowDown'){e.preventDefault();window.playerAPI.nextTrack();}
   });
 
   document.getElementById('preset-name-input').addEventListener('keydown',e=>{
@@ -1110,8 +1374,90 @@
   function formatTime(s){if(!s||isNaN(s))return'0:00';return`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;}
   function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
+  // ── 영속성: EQ + 플레이리스트 저장/복원 ─────────────────────
+  // 플레이리스트는 파일 경로 목록만 저장 (폴더 경로 X, 개별 파일 경로 O)
+  // 복원 시 addFilesToPlaylist 로 추가 → dedup 로직 통과 보장
+  function saveAppState() {
+    try {
+      localStorage.setItem('eqValues', JSON.stringify(eqValues));
+      localStorage.setItem('eqEnabled', JSON.stringify(state.eqEnabled));
+      localStorage.setItem('volume', String(state.volume));
+      // 경로만 저장 (name/duration 제외) → 복원 시 scan_folder로 재검증
+      const paths = state.playlist.map(t => t.path);
+      localStorage.setItem('playlistPaths', JSON.stringify(paths));
+    } catch(e) {}
+  }
+
+  function loadAppState() {
+    try {
+      // EQ 복원
+      const savedEQ = localStorage.getItem('eqValues');
+      if (savedEQ) {
+        eqValues = JSON.parse(savedEQ);
+        EQ_BANDS.forEach((_,i)=>{
+          const s=document.getElementById(`eq-${i}`);
+          if(s){s.value=eqValues[i];document.getElementById(`eq-val-${i}`).textContent=(eqValues[i]>0?'+':'')+eqValues[i];}
+        });
+        applyEQAll();
+      }
+      const savedEQEnabled = localStorage.getItem('eqEnabled');
+      if (savedEQEnabled !== null) {
+        state.eqEnabled = JSON.parse(savedEQEnabled);
+        document.getElementById('eq-switch').classList.toggle('on', state.eqEnabled);
+        invoke('audio_set_eq_enabled',{enabled:state.eqEnabled}).catch(()=>{});
+      }
+      // 볼륨 복원
+      const savedVol = localStorage.getItem('volume');
+      if (savedVol !== null) {
+        state.volume = parseInt(savedVol);
+        const vs = document.getElementById('vol-slider');
+        if (vs) { vs.value = state.volume; document.getElementById('vol-fill').style.width=state.volume+'%'; document.getElementById('vol-val').textContent=state.volume; }
+        invoke('audio_set_volume',{volume:state.volume}).catch(()=>{});
+      }
+      // 플레이리스트 복원 — 경로 목록을 scan_folder로 각각 검증 후 addFilesToPlaylist
+      // (이전 'playlist' 키도 하위호환으로 처리)
+      const rawPaths = localStorage.getItem('playlistPaths');
+      const legacyPL  = localStorage.getItem('playlist');
+      let savedPaths = [];
+      if (rawPaths) {
+        savedPaths = JSON.parse(rawPaths);
+      } else if (legacyPL) {
+        // 구버전 호환: 객체 배열에서 path 추출
+        savedPaths = JSON.parse(legacyPL).map(t => t.path);
+        localStorage.removeItem('playlist'); // 구버전 키 삭제
+      }
+      if (savedPaths.length) {
+        (async () => {
+          // 각 파일을 scan_folder로 canonicalize (파일이면 [path] 반환)
+          const verified = [];
+          for (const p of savedPaths) {
+            try {
+              const res = await invoke('scan_folder', {path: p});
+              if (res && res.length === 1) verified.push(res[0]);
+              // 파일이 존재하지 않으면 skip
+            } catch(e) {}
+          }
+          if (verified.length) await addFilesToPlaylist(verified);
+        })();
+      }
+    } catch(e) { console.warn('앱 상태 복원 실패:', e); }
+  }
+
+  // 종료/변경 시 자동 저장
+  window.addEventListener('beforeunload', saveAppState);
+  // 플레이리스트 변경 시마다 저장 (debounce)
+  let saveTimer = null;
+  const scheduleSave = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveAppState, 1000); };
+  const _origRender = renderPlaylist;
+  // renderPlaylist 호출마다 자동 저장 트리거
+  // (직접 override 대신 MutationObserver 사용)
+  new MutationObserver(scheduleSave).observe(
+    document.getElementById('playlist-list'), {childList:true, subtree:true}
+  );
+
   drawVU(); buildEQSliders(); renderPlaylist(); requestAnimationFrame(animate);
   loadOutputDevices();
+  loadAppState();
 
   // 장치 선택 이벤트 — loadOutputDevices 성공 여부와 무관하게 항상 등록
   document.getElementById('device-select').addEventListener('change', async function() {
