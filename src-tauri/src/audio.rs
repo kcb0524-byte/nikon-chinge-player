@@ -518,11 +518,12 @@ pub fn eq_band_defs() -> [EqBandDef; NUM_EQ_BANDS] {
 // ─────────────────────────────────────────────
 //  EQ 프로세서 (좌/우 채널 독립 처리)
 // ─────────────────────────────────────────────
+#[derive(Clone)]
 pub struct EqProcessor {
-    filters_l: Vec<BiquadState>,
-    filters_r: Vec<BiquadState>,
+    pub filters_l: Vec<BiquadState>,
+    pub filters_r: Vec<BiquadState>,
     gains_db: [f64; NUM_EQ_BANDS],
-    enabled: bool,
+    pub enabled: bool,
     sample_rate: f64,
 }
 
@@ -581,6 +582,7 @@ impl EqProcessor {
 // ─────────────────────────────────────────────
 //  볼륨 프로세서 (dB 단위, 지수 스무딩)
 // ─────────────────────────────────────────────
+#[derive(Clone)]
 pub struct VolumeProcessor {
     target_linear: f64,
     current_linear: f64,
@@ -794,15 +796,21 @@ impl Source for PcmSource {
 
 // ─────────────────────────────────────────────
 //  고음질 소스 래퍼 (DSP 체인 적용)
+//  핫패스에서 Mutex lock 경합 없애기 위해 로컬 복사본 사용
 // ─────────────────────────────────────────────
 pub struct HifiSource<S: Source<Item = f32>> {
     inner: S,
-    eq: Arc<Mutex<EqProcessor>>,
-    volume: Arc<Mutex<VolumeProcessor>>,
+    // 공유 상태 (외부에서 파라미터 변경용)
+    eq_shared: Arc<Mutex<EqProcessor>>,
+    vol_shared: Arc<Mutex<VolumeProcessor>>,
     spectrum: Arc<Mutex<SpectrumAnalyzer>>,
+    // 오디오 스레드 전용 로컬 복사본 (lock-free 핫패스)
+    eq_local: EqProcessor,
+    vol_local: VolumeProcessor,
     channels: u16,
-    // 스테레오 L 샘플 임시 저장
     pending_r: Option<f32>,
+    // 파라미터 동기화 카운터 (512샘플마다 갱신)
+    sync_counter: u32,
 }
 
 impl<S: Source<Item = f32>> HifiSource<S> {
@@ -815,7 +823,45 @@ impl<S: Source<Item = f32>> HifiSource<S> {
         let channels = inner.channels();
         let sr = inner.sample_rate() as f64;
         eq.lock().update_sample_rate(sr);
-        HifiSource { inner, eq, volume, spectrum, channels, pending_r: None }
+        let eq_local = eq.lock().clone();
+        let vol_local = volume.lock().clone();
+        HifiSource {
+            inner, eq_shared: eq, vol_shared: volume, spectrum,
+            eq_local, vol_local, channels, pending_r: None, sync_counter: 0,
+        }
+    }
+
+    #[inline(always)]
+    fn sync_params(&mut self) {
+        self.sync_counter += 1;
+        if self.sync_counter >= 512 {
+            self.sync_counter = 0;
+            if let Some(eq) = self.eq_shared.try_lock() {
+                // 계수가 바뀐 밴드만 업데이트 — 상태(s1,s2)는 유지해서 클릭 노이즈 방지
+                let new_gains = eq.get_gains();
+                let old_gains = self.eq_local.get_gains();
+                let enabled_changed = eq.enabled != self.eq_local.enabled;
+                if enabled_changed {
+                    self.eq_local.set_enabled(eq.enabled);
+                    // enabled 전환 시 필터 상태 리셋으로 폭발 방지
+                    for f in &mut self.eq_local.filters_l { f.reset(); }
+                    for f in &mut self.eq_local.filters_r { f.reset(); }
+                }
+                for i in 0..NUM_EQ_BANDS {
+                    if (new_gains[i] - old_gains[i]).abs() > 1e-6 {
+                        self.eq_local.set_band(i, new_gains[i]);
+                        // 큰 변화 시 해당 필터 상태만 리셋
+                        if (new_gains[i] - old_gains[i]).abs() > 3.0 {
+                            self.eq_local.filters_l[i].reset();
+                            self.eq_local.filters_r[i].reset();
+                        }
+                    }
+                }
+            }
+            if let Some(vol) = self.vol_shared.try_lock() {
+                self.vol_local = vol.clone();
+            }
+        }
     }
 }
 
@@ -823,29 +869,32 @@ impl<S: Source<Item = f32>> Iterator for HifiSource<S> {
     type Item = f32;
 
     fn next(&mut self) -> Option<f32> {
+        self.sync_params();
+
         if self.channels >= 2 {
             if let Some(r_processed) = self.pending_r.take() {
-                // 이전에 계산된 R 샘플 반환
                 return Some(r_processed);
             }
-            // L 샘플 읽기
             let l_raw = self.inner.next()? as f64;
             let r_raw = self.inner.next().unwrap_or(0.0) as f64;
 
-            let (eq_l, eq_r) = self.eq.lock().process(l_raw, r_raw);
-            let vol_l = self.volume.lock().process(eq_l) as f32;
-            let vol_r = {
-                let mut vol = self.volume.lock();
-                vol.process(eq_r) as f32
-            };
-            self.spectrum.lock().push(eq_l as f32, eq_r as f32);
+            let (eq_l, eq_r) = self.eq_local.process(l_raw, r_raw);
+            let vol_l = self.vol_local.process(eq_l) as f32;
+            let vol_r = self.vol_local.process(eq_r) as f32;
+
+            // 스펙트럼은 약하게 시도 (실패해도 프레임 스킵)
+            if let Some(mut sp) = self.spectrum.try_lock() {
+                sp.push(eq_l as f32, eq_r as f32);
+            }
             self.pending_r = Some(vol_r);
             Some(vol_l)
         } else {
             let s = self.inner.next()? as f64;
-            let (eq_s, _) = self.eq.lock().process(s, s);
-            let out = self.volume.lock().process(eq_s) as f32;
-            self.spectrum.lock().push(s as f32, s as f32);
+            let (eq_s, _) = self.eq_local.process(s, s);
+            let out = self.vol_local.process(eq_s) as f32;
+            if let Some(mut sp) = self.spectrum.try_lock() {
+                sp.push(s as f32, s as f32);
+            }
             Some(out)
         }
     }
@@ -1037,11 +1086,13 @@ impl AudioEngine {
         *self.seek_offset.lock() = 0.0;
 
         // 2단계: 백그라운드에서 PCM 캐시 준비 (이후 seek 즉각 처리용)
+        // 재생 초기 버퍼링 간섭 방지를 위해 2초 후 시작
         let raw2 = Arc::clone(&raw);
         let pcm_cache = Arc::clone(&self.pcm_cache);
         let pcm_ch = Arc::clone(&self.pcm_channels);
         let pcm_sr = Arc::clone(&self.pcm_sample_rate);
         std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(2000));
             let cursor2 = Cursor::new((*raw2).clone());
             if let Ok(dec2) = rodio::Decoder::new(cursor2) {
                 let dec2 = dec2.convert_samples::<f32>();
@@ -1087,10 +1138,13 @@ impl AudioEngine {
         self.eq.lock().set_band(band, gain_db);
     }
 
-    /// EQ 전체 12밴드 한번에 설정
+    /// EQ 전체 12밴드 한번에 설정 (프리셋 전환용 — 필터 상태 리셋으로 노이즈 방지)
     pub fn set_eq_all(&self, gains: [f64; 12]) {
         let mut eq = self.eq.lock();
         for (i, &g) in gains.iter().enumerate() { eq.set_band(i, g); }
+        // 전체 프리셋 전환 시 필터 내부 상태 리셋 → 지지직 노이즈 방지
+        for f in &mut eq.filters_l { f.reset(); }
+        for f in &mut eq.filters_r { f.reset(); }
     }
 
     /// EQ 활성화/비활성화

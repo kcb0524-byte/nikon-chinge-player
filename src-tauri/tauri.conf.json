@@ -12,9 +12,9 @@
       {
         "title": "니콘 친게 뮤직 플레이어",
         "width": 1280,
-        "height": 1060,
+        "height": 1140,
         "minWidth": 960,
-        "minHeight": 920,
+        "minHeight": 980,
         "resizable": true,
         "fullscreen": false,
         "dragDropEnabled": true
@@ -37,6 +37,13 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "exceptionDomain": "",
+      "frameworks": [],
+      "providerShortName": null,
+      "signingIdentity": null
+    }
   }
 }
