@@ -858,9 +858,7 @@ impl<S: Source<Item = f32>> HifiSource<S> {
                     }
                 }
             }
-            if let Some(vol) = self.vol_shared.try_lock() {
-                self.vol_local = vol.clone();
-            }
+            // 볼륨은 핫패스에서 직접 vol_shared 사용 — 로컬 복사 불필요
         }
     }
 }
@@ -879,10 +877,11 @@ impl<S: Source<Item = f32>> Iterator for HifiSource<S> {
             let r_raw = self.inner.next().unwrap_or(0.0) as f64;
 
             let (eq_l, eq_r) = self.eq_local.process(l_raw, r_raw);
-            let vol_l = self.vol_local.process(eq_l) as f32;
-            let vol_r = self.vol_local.process(eq_r) as f32;
-
-            // 스펙트럼은 약하게 시도 (실패해도 프레임 스킵)
+            // 볼륨은 항상 공유 상태에서 직접 읽음 (즉각 반영)
+            let (vol_l, vol_r) = {
+                let mut vol = self.vol_shared.lock();
+                (vol.process(eq_l) as f32, vol.process(eq_r) as f32)
+            };
             if let Some(mut sp) = self.spectrum.try_lock() {
                 sp.push(eq_l as f32, eq_r as f32);
             }
@@ -891,7 +890,7 @@ impl<S: Source<Item = f32>> Iterator for HifiSource<S> {
         } else {
             let s = self.inner.next()? as f64;
             let (eq_s, _) = self.eq_local.process(s, s);
-            let out = self.vol_local.process(eq_s) as f32;
+            let out = { self.vol_shared.lock().process(eq_s) as f32 };
             if let Some(mut sp) = self.spectrum.try_lock() {
                 sp.push(s as f32, s as f32);
             }

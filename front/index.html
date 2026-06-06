@@ -1376,14 +1376,16 @@
     }
   };
 
-  document.addEventListener('keydown',e=>{
+  function handleKey(e) {
     if(e.target.tagName==='INPUT') return;
     if(e.code==='Space'){e.preventDefault();window.playerAPI.togglePlay();}
-    else if(e.code==='ArrowRight'){e.preventDefault();volSlider.value=Math.min(100,+volSlider.value+5);volSlider.dispatchEvent(new Event('input'));}
-    else if(e.code==='ArrowLeft'){e.preventDefault();volSlider.value=Math.max(0,+volSlider.value-5);volSlider.dispatchEvent(new Event('input'));}
+    else if(e.code==='ArrowRight'){e.preventDefault();const v=Math.min(100,state.volume+5);state.volume=v;volSlider.value=v;document.getElementById('vol-fill').style.width=v+'%';document.getElementById('vol-val').textContent=v;invoke('audio_set_volume',{volume:v}).catch(console.error);}
+    else if(e.code==='ArrowLeft'){e.preventDefault();const v=Math.max(0,state.volume-5);state.volume=v;volSlider.value=v;document.getElementById('vol-fill').style.width=v+'%';document.getElementById('vol-val').textContent=v;invoke('audio_set_volume',{volume:v}).catch(console.error);}
     else if(e.code==='ArrowUp'){e.preventDefault();window.playerAPI.prevTrack();}
     else if(e.code==='ArrowDown'){e.preventDefault();window.playerAPI.nextTrack();}
-  });
+  }
+  document.addEventListener('keydown', handleKey);
+  window.addEventListener('keydown', handleKey);
 
   document.getElementById('preset-name-input').addEventListener('keydown',e=>{
     if(e.key==='Enter') window.playerAPI.confirmSaveEQ();
